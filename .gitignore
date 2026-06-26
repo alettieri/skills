@@ -1,0 +1,11 @@
+# 1. Ignore all files globally
+*
+
+# 2. Track directories so Git can look inside them
+!*/
+
+# 3. Allow the .gitignore file itself
+!.gitignore
+
+!./herdr-worktree-flow
+
