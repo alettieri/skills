@@ -111,6 +111,37 @@ function runGhJson(args, repo, acceptableStatuses = new Set([0])) {
   return JSON.parse(stdout);
 }
 
+function runHerdr(args, acceptableStatuses = new Set([0])) {
+  const result = spawnSync('herdr', args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  if (result.error) {
+    if (result.error.code === 'ENOENT') {
+      throw new Error('herdr is not installed or not on PATH');
+    }
+    throw result.error;
+  }
+
+  if (!acceptableStatuses.has(result.status)) {
+    const stderr = result.stderr?.trim() ?? '';
+    throw new Error(`herdr ${args.join(' ')} failed with exit ${result.status}: ${stderr}`);
+  }
+
+  return result;
+}
+
+function runHerdrJson(args) {
+  const result = runHerdr(args);
+  const stdout = result.stdout.trim();
+  if (!stdout) {
+    return null;
+  }
+
+  return JSON.parse(stdout);
+}
+
 function maxTimestamp(values) {
   const timestamps = values
     .map((value) => (value ? Date.parse(value) : Number.NEGATIVE_INFINITY))
@@ -405,15 +436,19 @@ async function snapshot(args) {
 }
 
 async function sendNotification(target, body) {
-  const result = spawnSync('herdr', ['agent', 'send', target, body], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  runHerdr(['agent', 'send', target, body]);
+  const agent = runHerdrJson(['agent', 'get', target]);
 
-  if (result.status !== 0) {
-    const stderr = result.stderr?.trim() ?? '';
-    throw new Error(`herdr agent send ${target} failed with exit ${result.status}: ${stderr}`);
+  const paneId = agent?.result?.agent?.pane_id;
+  if (paneId) {
+    runHerdr(['pane', 'send-keys', paneId, 'Return']);
+    return;
   }
+
+  throw new Error(
+    `herdr send target ${target} has no pane_id; cannot send Return.\n`
+    + 'Use a concrete Herdr agent target from `herdr agent list`.',
+  );
 }
 
 async function main() {

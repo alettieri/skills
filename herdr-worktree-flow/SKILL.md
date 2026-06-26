@@ -59,6 +59,12 @@ herdr agent start issue-orchestrator --cwd <worktree-path> --workspace <workspac
 herdr agent send issue-orchestrator "Read <worktree>/.agent/issue-brief.md and start."
 ```
 
+When you create additional panes for monitor/reviewer/editing workstreams, always split vertically:
+
+```bash
+herdr pane split --direction down ...
+```
+
 Always prefer current Herdr help over these examples if the CLI has changed.
 If the briefing is staged with `pane send-text`, follow it immediately with `pane send-keys ... Return`; `agent send` alone only writes text.
 
@@ -121,10 +127,17 @@ After the PR exists, monitor until the PR is merged or closed.
 Use the bundled PR monitor script as the authoritative loop:
 
 ```bash
-node scripts/pr-monitor.mjs --pr <pr-ref> --state-file <worktree>/.agent/pr-monitor.json --notify-target <concrete-herdr-target>
+node scripts/pr-monitor.mjs --pr <pr-ref> --state-file <worktree>/.agent/pr-monitor.json --notify-target <herdr-target>
 ```
 
-Run it in a dedicated Herdr tab inside the issue workspace. The `--notify-target` value must be the concrete Herdr send target for the active agent or session, not a generic role label. Treat its output and state file as the source of truth for the PR lifecycle. The monitor polls until the PR becomes actionable or terminal, writes the latest JSON state file before notifying, sends exactly one Herdr message, and exits.
+Run it in a dedicated Herdr tab inside the issue workspace. The `--notify-target` value must be a concrete Herdr target from `herdr agent list` (agent name, terminal id, or detected label), not a tab id.
+
+```bash
+herdr agent list
+```
+
+Treat its output and state file as the source of truth for the PR lifecycle. The monitor polls until the PR becomes actionable or terminal, writes the latest JSON state file before notifying, sends exactly one Herdr message, and exits.
+`agent send` is submitted with a return so the target receives it as an actionable prompt.
 
 1. Treat the feedback as new implementation input.
 2. Dispatch an implementer agent in an implementation tab to address it.
