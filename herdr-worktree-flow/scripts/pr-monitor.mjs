@@ -10,6 +10,7 @@ function parseArgs(argv) {
   const args = {
     intervalSeconds: 30,
     once: false,
+    notifyTarget: null,
     quiet: false,
     output: 'text',
     prRef: null,
@@ -35,6 +36,12 @@ function parseArgs(argv) {
       args.repo = argv[++i];
     } else if (arg === '--state-file') {
       args.stateFile = argv[++i];
+    } else if (arg === '--notify-target') {
+      const target = argv[++i];
+      if (target === undefined || target.startsWith('--')) {
+        throw new Error('--notify-target requires a target value');
+      }
+      args.notifyTarget = target;
     } else if (arg === '--help' || arg === '-h') {
       printHelpAndExit(0);
     } else {
@@ -44,6 +51,10 @@ function parseArgs(argv) {
 
   if (!Number.isFinite(args.intervalSeconds) || args.intervalSeconds <= 0) {
     throw new Error('--interval must be a positive number');
+  }
+
+  if (args.notifyTarget !== null && args.notifyTarget.trim() === '') {
+    throw new Error('--notify-target must not be empty');
   }
 
   return args;
@@ -56,6 +67,8 @@ function printHelpAndExit(code) {
   process.stdout.write(`  --repo <owner/repo> GitHub repository override for gh.\n`);
   process.stdout.write(`  --interval <sec>    Poll interval in seconds. Default: 30.\n`);
   process.stdout.write(`  --state-file <path> Write the latest snapshot to a JSON state file.\n`);
+  process.stdout.write(`  --notify-target <target>\n`);
+  process.stdout.write(`                      Send one Herdr notification to the target when the PR becomes actionable or terminal.\n`);
   process.stdout.write(`  --json              Emit JSON lines.\n`);
   process.stdout.write(`  --text              Emit human-readable lines. Default.\n`);
   process.stdout.write(`  --quiet             Only emit when the snapshot changes.\n`);
@@ -90,6 +103,37 @@ function runGhJson(args, repo, acceptableStatuses = new Set([0])) {
     throw new Error(`gh ${args.join(' ')} failed with exit ${result.status}: ${result.stderr.trim()}`);
   }
 
+  const stdout = result.stdout.trim();
+  if (!stdout) {
+    return null;
+  }
+
+  return JSON.parse(stdout);
+}
+
+function runHerdr(args, acceptableStatuses = new Set([0])) {
+  const result = spawnSync('herdr', args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  if (result.error) {
+    if (result.error.code === 'ENOENT') {
+      throw new Error('herdr is not installed or not on PATH');
+    }
+    throw result.error;
+  }
+
+  if (!acceptableStatuses.has(result.status)) {
+    const stderr = result.stderr?.trim() ?? '';
+    throw new Error(`herdr ${args.join(' ')} failed with exit ${result.status}: ${stderr}`);
+  }
+
+  return result;
+}
+
+function runHerdrJson(args) {
+  const result = runHerdr(args);
   const stdout = result.stdout.trim();
   if (!stdout) {
     return null;
@@ -169,6 +213,76 @@ function summarizeChecks(checks) {
   return summary;
 }
 
+function describeNotificationReason(report) {
+  if (report.terminal) {
+    return report.mergedAt ? 'merged' : 'closed';
+  }
+
+  if (report.reviewDecision === 'CHANGES_REQUESTED') {
+    return 'changes_requested';
+  }
+
+  if (report.checks.bucket === 'fail') {
+    return 'failing_checks';
+  }
+
+  if (report.checks.bucket === 'cancel') {
+    return 'canceled_checks';
+  }
+
+  return report.reasons[0] ?? 'monitoring';
+}
+
+function formatCheckSummary(checks) {
+  return `bucket=${checks.bucket} total=${checks.total} failing=${checks.failing} pending=${checks.pending} canceled=${checks.canceled} skipped=${checks.skipped} passing=${checks.passing}`;
+}
+
+function formatCheckPointer(check) {
+  const parts = [];
+
+  if (check.workflow) {
+    parts.push(check.workflow);
+  }
+
+  if (check.name && check.name !== check.workflow) {
+    parts.push(check.name);
+  }
+
+  if (check.description) {
+    parts.push(check.description);
+  }
+
+  if (check.link) {
+    parts.push(check.link);
+  }
+
+  return `- ${parts.join(' | ')}`;
+}
+
+function formatNotificationBody(report, stateFile) {
+  const lines = [
+    `PR #${report.prNumber ?? '?'}`,
+    `URL: ${report.prUrl ?? '(unknown)'}`,
+    `Reason: ${describeNotificationReason(report)}`,
+    `Review decision: ${report.reviewDecision}`,
+    `Check summary: ${formatCheckSummary(report.checks)}`,
+    `State file: ${stateFile ?? '(none)'}`,
+  ];
+
+  const pointers = Array.isArray(report.checkResults)
+    ? report.checkResults.filter((check) => check?.bucket === 'fail' || check?.bucket === 'cancel')
+    : [];
+
+  if (pointers.length > 0) {
+    lines.push('Failed check pointers:');
+    for (const check of pointers) {
+      lines.push(formatCheckPointer(check));
+    }
+  }
+
+  return lines.join('\n');
+}
+
 function classifySnapshot(snapshot) {
   const merged = Boolean(snapshot.mergedAt);
   const closed = Boolean(snapshot.closedAt) && !merged;
@@ -221,6 +335,7 @@ function classifySnapshot(snapshot) {
     actionRequired,
     feedbackPresent,
     reasons,
+    checkResults: Array.isArray(snapshot.checks) ? snapshot.checks : [],
     terminal,
     generatedAt: new Date().toISOString(),
     fingerprint: JSON.stringify({
@@ -320,23 +435,49 @@ async function snapshot(args) {
   });
 }
 
+async function sendNotification(target, body) {
+  runHerdr(['agent', 'send', target, body]);
+  const agent = runHerdrJson(['agent', 'get', target]);
+
+  const paneId = agent?.result?.agent?.pane_id;
+  if (paneId) {
+    runHerdr(['pane', 'send-keys', paneId, 'Return']);
+    return;
+  }
+
+  throw new Error(
+    `herdr send target ${target} has no pane_id; cannot send Return.\n`
+    + 'Use a concrete Herdr agent target from `herdr agent list`.',
+  );
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const baselineFingerprint = loadBaselineFingerprint(args.stateFile);
   let lastFingerprint = baselineFingerprint;
+  const notifyMode = Boolean(args.notifyTarget);
 
   while (true) {
     const report = await snapshot(args);
-    if (report.fingerprint !== lastFingerprint || !args.quiet) {
+    if (!notifyMode && (report.fingerprint !== lastFingerprint || !args.quiet)) {
       const payload = args.output === 'json' ? JSON.stringify(report) : formatText(report);
       process.stdout.write(`${payload}\n`);
       lastFingerprint = report.fingerprint;
     }
 
-    await writeStateFile(args.stateFile, report);
+    if (notifyMode) {
+      if (report.actionRequired || report.terminal) {
+        await writeStateFile(args.stateFile, report);
+        const body = formatNotificationBody(report, args.stateFile);
+        await sendNotification(args.notifyTarget, body);
+        process.exit(0);
+      }
+    } else {
+      await writeStateFile(args.stateFile, report);
 
-    if (report.terminal || args.once) {
-      process.exit(0);
+      if (report.terminal || args.once) {
+        process.exit(0);
+      }
     }
 
     await new Promise((resolve) => setTimeout(resolve, args.intervalSeconds * 1000));
@@ -355,6 +496,7 @@ if (entryPoint && import.meta.url === entryPoint) {
 export {
   classifySnapshot,
   formatText,
+  formatNotificationBody,
   maxTimestamp,
   parseArgs,
   summarizeChecks,
