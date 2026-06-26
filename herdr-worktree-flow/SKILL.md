@@ -24,19 +24,9 @@ Once the main orchestrator creates and briefs an issue orchestrator, ownership o
 
 The main orchestrator must not continue coordinating, implementing, reviewing, or checking progress for that same issue unless the issue orchestrator reports a blocker that genuinely requires user input.
 
-The issue orchestrator is responsible for:
+Handoff completes when the briefing is submitted with Enter and Herdr reports the issue orchestrator as `working`. After that, the issue orchestrator owns implementation, review, verification, PR handling, and feedback loops for that issue.
 
-- spawning implementer and reviewer agents in Herdr tabs within the issue workspace;
-- running verification;
-- committing and pushing changes;
-- opening and monitoring the PR; and
-- reporting completion or blockage back to the main orchestrator.
-
-The main orchestrator remains available for new planning work and should not be used as a second control plane for the same issue.
-
-Handoff to the issue orchestrator is complete only after the briefing has been submitted with Enter and Herdr reports the issue orchestrator as `working`.
-
-The main orchestrator writes one canonical briefing file into the worktree before handoff. Use that file as the source of truth instead of restating the whole task in the prompt. The issue orchestrator may re-open it whenever it needs context.
+Write one canonical briefing file into the worktree before handoff. The issue orchestrator reads that file for context and may reopen it later if needed.
 
 ## Workflow
 
@@ -139,6 +129,7 @@ After review passes:
 6. Record the PR URL in the lifecycle log.
 
 The user has authorized automatic commit and push once review passes and required checks succeed. Still stop before destructive actions, secret exposure, force-pushes, or any operation that would overwrite user work.
+Never merge the PR. Opening it and monitoring feedback are the end of the agent's role; merge is a human action only.
 
 ### 7. Monitor PR feedback
 
@@ -167,7 +158,7 @@ Stop when the PR is merged, closed, or the loop is blocked by missing credential
 - Consume an existing issue. Planning and issue creation belong to the main orchestrator before this skill starts.
 - Keep the issue orchestrator separate from the implementer by default.
 - The issue orchestrator must spawn implementer and reviewer agents in Herdr tabs within the issue workspace.
-- When the runtime supports model selection, use `gpt-4o-mini` for the implementer and reviewer agents.
+- When the runtime supports model selection, use `gpt-4o-mini` for implementer and reviewer agents.
 - Treat review as an independent pass, not a second look by the implementer.
 - Use `/review-pr` for PR review and mirror its four-reviewer structure for pre-PR local review.
 - Treat Nits as non-blocking. Treat Block and Major findings as required fixes.
@@ -177,7 +168,7 @@ Stop when the PR is merged, closed, or the loop is blocked by missing credential
 - Poll PR feedback until merge or close, unless blocked.
 - Do not force-push, rewrite shared history, delete branches, or remove worktrees unless the user explicitly asks.
 - Do not edit repo-tracked files from the main orchestrator after the handoff; all implementation changes belong to the issue orchestrator and its implementer/reviewer agents.
-- Do not merge the PR, that's the humans responsibility.
+- Never merge the PR or invoke any merge command; stop after opening the PR and monitoring feedback.
 
 ## Practical Defaults
 
