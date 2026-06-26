@@ -14,17 +14,13 @@ Do not create the issue here. If there is no issue number, URL, or unambiguous e
 - **Main orchestrator**: verifies the issue exists, creates the Herdr worktree workspace, starts the issue orchestrator, and then steps back unless the issue orchestrator reports a blocker that needs user input.
 - **Issue orchestrator**: runs in the primary tab for the issue worktree and owns the implementation lifecycle end to end.
 - **Implementer agent**: makes code changes. Prefer the `/implement` skill when available and appropriate.
-- **Reviewer agent(s)**: independently review the work. Before a PR exists, mirror the `/review-pr` lenses against the local diff: structure, implementation correctness, consistency, and tests. After a PR exists, use `/review-pr`.
+- **Review orchestrator**: runs one review tab per review cycle, dispatches the `/review-pr` lenses internally, and reports one synthesized findings set back to the issue orchestrator.
 
 The issue orchestrator coordinates the lifecycle and may not directly modify repo-tracked files. If implementation blocks, it must re-dispatch work, resolve the blocker within the worktree, or report the blocker to the main orchestrator. It does not take over the code change itself.
 
 ## Handoff Model
 
-Once the main orchestrator creates and briefs an issue orchestrator, ownership of that issue transfers to the issue orchestrator.
-
-The main orchestrator must not continue coordinating, implementing, reviewing, or checking progress for that same issue unless the issue orchestrator reports a blocker that genuinely requires user input.
-
-Handoff completes when the briefing is submitted with Enter and Herdr reports the issue orchestrator as `working`. After that, the issue orchestrator owns implementation, review, verification, PR handling, and feedback loops for that issue.
+Handoff completes when the briefing is submitted with Enter and Herdr reports the issue orchestrator as `working`. From that point on, the issue orchestrator owns implementation, review, verification, PR handling, and feedback loops for that issue.
 
 Write one canonical briefing file into the worktree before handoff. The issue orchestrator reads that file for context and may reopen it later if needed.
 
@@ -95,20 +91,7 @@ Do not commit the lifecycle log unless the repo already tracks similar agent han
 
 ### 5. Review before committing
 
-Run an independent review loop before the final commit.
-
-Before a PR exists, spawn reviewers against the local diff from the base branch. Use the same review lenses as `/review-pr`:
-
-- structure
-- implementation correctness
-- consistency with the existing codebase
-- tests
-
-Each reviewer should run in its own Herdr tab inside the issue workspace, with `--cwd` set to the worktree path. Keep review tabs separate from the implementer tab so review context stays independent.
-
-If a PR already exists, use `/review-pr` instead.
-
-Review passes when there are no Block or Major findings. Minor findings may be fixed at the issue orchestrator's discretion. Nits are non-blocking.
+Run one review orchestrator tab before the final commit. Before a PR exists, it runs the `/review-pr` lenses internally against the local diff; once a PR exists, it uses `/review-pr` directly. Review passes when there are no Block or Major findings. Minor findings may be fixed at the issue orchestrator's discretion. Nits are non-blocking.
 
 For Block or Major findings:
 
@@ -141,11 +124,11 @@ Use the bundled PR monitor script as the authoritative loop:
 node scripts/pr-monitor.mjs --pr <pr-ref> --state-file <worktree>/.agent/pr-monitor.json
 ```
 
-Run it in a dedicated Herdr tab inside the issue workspace. Treat its output and state file as the source of truth for the PR lifecycle. If it reports `action-required`, `failing_checks`, or `changes_requested`, dispatch an implementation pass and then re-run review.
+Run it in a dedicated Herdr tab inside the issue workspace. Treat its output and state file as the source of truth for the PR lifecycle. If it reports `action-required`, `failing_checks`, or `changes_requested`, send the findings to the review orchestrator and then dispatch implementation as needed.
 
 1. Treat the feedback as new implementation input.
 2. Dispatch an implementer agent in an implementation tab to address it.
-3. Run `/review-pr` or an equivalent independent review pass in review tabs.
+3. Have the review orchestrator rerun its internal review cycle.
 4. Run required checks.
 5. Commit and push fixes when review passes.
 6. Continue monitoring through the script until it reports `merged` or `closed`.
@@ -157,10 +140,10 @@ Stop when the PR is merged, closed, or the loop is blocked by missing credential
 - Keep implementation isolated in the worktree; do not mix it back into the source checkout.
 - Consume an existing issue. Planning and issue creation belong to the main orchestrator before this skill starts.
 - Keep the issue orchestrator separate from the implementer by default.
-- The issue orchestrator must spawn implementer and reviewer agents in Herdr tabs within the issue workspace.
-- When the runtime supports model selection, use `gpt-4o-mini` for implementer and reviewer agents.
+- The issue orchestrator must spawn implementer agents and one review orchestrator in Herdr tabs within the issue workspace.
+- When the runtime supports model selection, use `gpt-5.4-mini` for the implementer agent and review orchestrator.
 - Treat review as an independent pass, not a second look by the implementer.
-- Use `/review-pr` for PR review and mirror its four-reviewer structure for pre-PR local review.
+- Use `/review-pr` as the internal review contract.
 - Treat Nits as non-blocking. Treat Block and Major findings as required fixes.
 - Use `scripts/pr-monitor.mjs` for PR lifecycle polling instead of a passive `gh pr checks --watch` loop.
 - Prefer the repository's existing branch naming and worktree conventions when they are discoverable.
@@ -175,7 +158,7 @@ Stop when the PR is merged, closed, or the loop is blocked by missing credential
 - Use a descriptive branch name derived from the issue or task.
 - Use one primary tab for the issue orchestrator.
 - Use one implementation tab per active implementer pass.
-- Use one review tab per reviewer lens or `/review-pr` run.
+- Use one review orchestrator tab per review cycle.
 - Use a single local lifecycle log for handoff and recovery.
 - Surface blockers immediately if the environment cannot support the requested workflow.
 - Report the worktree path, branch, PR URL, latest commit, and final PR state when the lifecycle stops.
