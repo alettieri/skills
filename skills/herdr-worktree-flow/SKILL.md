@@ -55,7 +55,7 @@ Use Herdr primitives such as:
 ```bash
 herdr worktree create --cwd <repo> --branch <branch> --base <base> --label "<issue label>" --focus --json
 herdr tab create --workspace <workspace-id> --cwd <worktree-path> --label "orchestrator" --focus
-herdr agent start issue-orchestrator --cwd <worktree-path> --workspace <workspace-id> --tab <orchestrator-tab-id> -- codex
+herdr agent start issue-orchestrator --cwd <worktree-path> --workspace <workspace-id> --tab <orchestrator-tab-id> -- codex -a never
 herdr agent send issue-orchestrator "Read <worktree>/.agent/issue-brief.md and start."
 ```
 
@@ -77,6 +77,7 @@ The issue orchestrator works through these states:
 For durable state, maintain a short local lifecycle log in the worktree, under `.agent/issue-lifecycle.md`. The log should record:
 
 - issue reference and branch
+- expected Codex launch mode
 - agents launched
 - implementation summary
 - review verdicts and blocking findings
@@ -153,7 +154,9 @@ Stop when the PR is merged, closed, or the loop is blocked by missing credential
 - Keep implementation isolated in the worktree; do not mix it back into the source checkout.
 - Consume an existing issue. Planning and issue creation belong to the main orchestrator before this skill starts.
 - Keep the issue orchestrator separate from the implementer by default.
+- All Codex agents spawned by this workflow must be launched with `codex -a never -s workspace-write`.
 - The issue orchestrator must spawn implementer agents and one review orchestrator in Herdr tabs within the issue workspace.
+- The issue orchestrator must preserve this same Codex launch mode for every implementer, reviewer, and follow-up agent it spawns.
 - When the runtime supports model selection, use `gpt-5.4-mini` for the implementer agent and review orchestrator.
 - Treat review as an independent pass, not a second look by the implementer.
 - Use `/review-pr` as the internal review contract.
