@@ -127,7 +127,7 @@ After the PR exists, monitor until the PR is merged or closed.
 Use the bundled PR monitor script as the authoritative loop:
 
 ```bash
-node scripts/pr-monitor.mjs --pr <pr-ref> --state-file <worktree>/.agent/pr-monitor.json --notify-target <herdr-target>
+../../scripts/tsx scripts/pr-monitor.ts --pr <pr-ref> --state-file <worktree>/.agent/pr-monitor.json --notify-target <herdr-target>
 ```
 
 Run it in a dedicated Herdr tab inside the issue workspace. The `--notify-target` value must be a concrete Herdr target from `herdr agent list` (agent name, terminal id, or detected label), not a tab id.
@@ -158,7 +158,7 @@ Stop when the PR is merged, closed, or the loop is blocked by missing credential
 - Treat review as an independent pass, not a second look by the implementer.
 - Use `/review-pr` as the internal review contract.
 - Treat Nits as non-blocking. Treat Block and Major findings as required fixes.
-- Use `scripts/pr-monitor.mjs` for PR lifecycle polling instead of a passive `gh pr checks --watch` loop.
+- Use `scripts/pr-monitor.ts` with the repo-local `tsx` runner for PR lifecycle polling instead of a passive `gh pr checks --watch` loop.
 - Prefer the repository's existing branch naming and worktree conventions when they are discoverable.
 - If the Herdr command surface changes, use the current help output instead of assuming old flags.
 - Poll PR feedback until merge or close, unless blocked.

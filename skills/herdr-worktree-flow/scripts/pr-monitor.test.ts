@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifySnapshot, formatNotificationBody, parseArgs, summarizeChecks } from './pr-monitor.mjs';
+import {
+  classifySnapshot,
+  formatNotificationBody,
+  normalizeCheckResultsPayload,
+  normalizeHerdrPaneId,
+  normalizePullRequestPayload,
+  parseArgs,
+  summarizeChecks,
+} from './pr-monitor.ts';
+import type { CheckResult } from './pr-monitor-domain.ts';
 
 test('summarizeChecks prefers failing over pending and pass', () => {
   const summary = summarizeChecks([
@@ -17,7 +26,7 @@ test('summarizeChecks prefers failing over pending and pass', () => {
 });
 
 test('summarizeChecks preserves unknown when no known buckets exist', () => {
-  const summary = summarizeChecks([{ bucket: 'mystery' }]);
+  const summary = summarizeChecks([{ bucket: 'unknown' }]);
 
   assert.equal(summary.bucket, 'unknown');
   assert.equal(summary.total, 1);
@@ -114,4 +123,69 @@ test('parseArgs rejects a missing notification target value', () => {
 
 test('parseArgs rejects an empty notification target', () => {
   assert.throws(() => parseArgs(['--pr', '42', '--notify-target', '   ']), /--notify-target must not be empty/);
+});
+
+test('normalizePullRequestPayload rejects non-object gh pr view payloads', () => {
+  assert.throws(() => normalizePullRequestPayload([]), /gh pr view returned malformed JSON/);
+  assert.throws(() => normalizePullRequestPayload(null), /gh pr view returned malformed JSON/);
+});
+
+test('normalizePullRequestPayload defaults malformed comment and review lists to empty arrays', () => {
+  const normalized = normalizePullRequestPayload({
+    number: 42,
+    url: 'https://github.com/acme/repo/pull/42',
+    comments: 'not-an-array',
+    reviews: { totalCount: 1 },
+  });
+
+  assert.equal(normalized.number, 42);
+  assert.deepEqual(normalized.comments, []);
+  assert.deepEqual(normalized.reviews, []);
+});
+
+test('normalizePullRequestPayload ignores malformed nested feedback timestamps', () => {
+  const normalized = normalizePullRequestPayload({
+    comments: [{ createdAt: '2026-06-25T12:00:00Z' }, { createdAt: 123 }, 'bad-comment'],
+    reviews: [{ submittedAt: '2026-06-25T12:30:00Z' }, { submittedAt: false }, null],
+  });
+
+  assert.deepEqual(normalized.comments, [
+    { createdAt: '2026-06-25T12:00:00Z' },
+    { createdAt: undefined },
+    {},
+  ]);
+  assert.deepEqual(normalized.reviews, [
+    { submittedAt: '2026-06-25T12:30:00Z' },
+    { submittedAt: undefined },
+    {},
+  ]);
+});
+
+test('normalizeCheckResultsPayload converts malformed check payloads to typed unknown checks', () => {
+  const normalized = normalizeCheckResultsPayload([
+    { bucket: 'fail', workflow: 'ci', name: 'test', link: 'https://example.com/check/1' },
+    { bucket: 'mystery', name: 123 },
+    'bad-check',
+  ]);
+
+  assert.deepEqual(normalized, [
+    { bucket: 'fail', workflow: 'ci', name: 'test', link: 'https://example.com/check/1' },
+    { bucket: 'unknown' },
+    { bucket: 'unknown' },
+  ] satisfies CheckResult[]);
+});
+
+test('normalizeCheckResultsPayload treats non-array gh checks payloads as no checks', () => {
+  assert.deepEqual(normalizeCheckResultsPayload({ bucket: 'fail' }), []);
+  assert.deepEqual(normalizeCheckResultsPayload(null), []);
+});
+
+test('normalizeHerdrPaneId accepts only concrete string pane ids', () => {
+  assert.equal(normalizeHerdrPaneId({ result: { agent: { pane_id: 'pane-1' } } }), 'pane-1');
+  assert.equal(normalizeHerdrPaneId(null), null);
+  assert.equal(normalizeHerdrPaneId([]), null);
+  assert.equal(normalizeHerdrPaneId({}), null);
+  assert.equal(normalizeHerdrPaneId({ result: {} }), null);
+  assert.equal(normalizeHerdrPaneId({ result: { agent: {} } }), null);
+  assert.equal(normalizeHerdrPaneId({ result: { agent: { pane_id: 123 } } }), null);
 });
