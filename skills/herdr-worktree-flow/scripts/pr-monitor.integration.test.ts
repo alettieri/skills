@@ -49,6 +49,10 @@ if (args[0] === 'pr' && args[1] === 'view') {
   process.exit(0);
 }
 if (args[0] === 'pr' && args[1] === 'checks') {
+  if (scenario === 'no-checks') {
+    process.stderr.write('no checks reported on the issue-4-pr-monitor-typescript branch');
+    process.exit(1);
+  }
   const bucket = scenario === 'fail' ? 'fail' : 'pass';
   process.stdout.write(JSON.stringify([{ bucket, workflow: 'ci', name: 'test', link: 'https://example.com/check/1' }]));
   process.exit(0);
@@ -165,6 +169,29 @@ test('CLI writes state files and quiet suppresses unchanged snapshots', () => {
   const state = JSON.parse(readFileSync(stateFile, 'utf8'));
   assert.equal(state.prNumber, 42);
   assert.equal(state.checks.bucket, 'pass');
+});
+
+test('CLI treats gh no-checks-reported failures as an empty check list', () => {
+  const fixture = makeFixture();
+  const stateFile = join(fixture.dir, 'state', 'pr-monitor.json');
+  const result = runMonitor(['--once', '--json', '--state-file', stateFile, '--pr', '5'], {
+    fakeBin: fixture.fakeBin,
+    env: {
+      PR_MONITOR_COMMAND_LOG: fixture.logFile,
+      PR_MONITOR_SCENARIO: 'no-checks',
+    },
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stderr, '');
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.checks.bucket, 'unknown');
+  assert.equal(report.checks.total, 0);
+  assert.deepEqual(report.checkResults, []);
+
+  const state = JSON.parse(readFileSync(stateFile, 'utf8'));
+  assert.equal(state.checks.total, 0);
+  assert.deepEqual(state.checkResults, []);
 });
 
 test('CLI --once exits after terminal merged snapshots', () => {

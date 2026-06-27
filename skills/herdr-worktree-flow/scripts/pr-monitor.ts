@@ -71,6 +71,27 @@ function runGhJson(args: string[], repo: string | null, acceptableStatuses = new
   return JSON.parse(stdout) as unknown;
 }
 
+function isNoChecksReportedResult(result: CommandResult): boolean {
+  return result.status === 1 && result.stderr.trim().includes('no checks reported');
+}
+
+function runGhChecksJson(args: string[], repo: string | null): unknown {
+  const result = runGh(args, repo);
+  if (isNoChecksReportedResult(result)) {
+    return [];
+  }
+  if (result.status === null || !new Set([0, 8]).has(result.status)) {
+    throw new Error(`gh ${args.join(' ')} failed with exit ${result.status}: ${result.stderr.trim()}`);
+  }
+
+  const stdout = result.stdout.trim();
+  if (!stdout) {
+    return null;
+  }
+
+  return JSON.parse(stdout) as unknown;
+}
+
 function runHerdr(args: string[], acceptableStatuses = new Set([0])): CommandResult {
   const result = spawnSync('herdr', args, {
     encoding: 'utf8',
@@ -149,10 +170,9 @@ async function snapshot(args: MonitorArgs): Promise<MonitorReport> {
 
   const pr = normalizePullRequestPayload(runGhJson(prViewArgs, args.repo));
   const checks = normalizeCheckResultsPayload(
-    runGhJson(
+    runGhChecksJson(
       ['pr', 'checks', ...(args.prRef ? [args.prRef] : []), '--json', 'bucket,state,name,workflow,description,link'],
       args.repo,
-      new Set([0, 8]),
     ),
   );
 
