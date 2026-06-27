@@ -14,12 +14,57 @@ import {
   normalizeBaselineFingerprint,
   normalizeCheckResultsPayload,
   normalizePullRequestPayload,
+  normalizeNotifiedFingerprint,
   parseArgs,
   normalizeHerdrPaneId,
 } from './pr-monitor-domain.ts';
 import type { MonitorArgs, MonitorReport } from './pr-monitor-domain.ts';
 
 type CommandResult = ReturnType<typeof spawnSync>;
+
+function logStderr(message: string): void {
+  process.stderr.write(`${message}\n`);
+}
+
+function formatArgsValue(value: string | null): string {
+  return value ?? '(default)';
+}
+
+function logStartup(args: MonitorArgs): void {
+  logStderr(
+    [
+      'pr-monitor start',
+      `output=${args.output}`,
+      `interval=${args.intervalSeconds}`,
+      `once=${args.once}`,
+      `quiet=${args.quiet}`,
+      `pr=${formatArgsValue(args.prRef)}`,
+      `repo=${formatArgsValue(args.repo)}`,
+      `stateFile=${formatArgsValue(args.stateFile)}`,
+      `notifyTarget=${formatArgsValue(args.notifyTarget)}`,
+    ].join(' '),
+  );
+}
+
+function logPoll(report: MonitorReport): void {
+  logStderr(
+    [
+      'pr-monitor poll',
+      `pr=${report.prNumber ?? '?'}`,
+      `state=${report.state ?? '(unknown)'}`,
+      `review=${report.reviewDecision}`,
+      `checks=${report.checks.bucket}`,
+      `comments=${report.commentCount}`,
+      `reviews=${report.reviewCount}`,
+      `reasons=${report.reasons.join(',') || 'none'}`,
+      `actionRequired=${report.actionRequired}`,
+    ].join(' '),
+  );
+}
+
+function logDecision(message: string): void {
+  logStderr(`pr-monitor decision ${message}`);
+}
 
 export function printHelp(): void {
   process.stdout.write(`Usage: pr-monitor.ts [options]\n\n`);
@@ -78,6 +123,7 @@ function isNoChecksReportedResult(result: CommandResult): boolean {
 function runGhChecksJson(args: string[], repo: string | null): unknown {
   const result = runGh(args, repo);
   if (isNoChecksReportedResult(result)) {
+    logStderr(`pr-monitor gh checks normalized empty: ${result.stderr.trim()}`);
     return [];
   }
   if (result.status === null || !new Set([0, 8]).has(result.status)) {
@@ -123,12 +169,24 @@ function runHerdrJson(args: string[]): unknown {
   return JSON.parse(stdout) as unknown;
 }
 
-async function writeStateFile(stateFile: string | null, report: MonitorReport): Promise<void> {
+type PersistedState = MonitorReport & {
+  notifiedFingerprint?: string | null;
+};
+
+async function writeStateFile(
+  stateFile: string | null,
+  report: MonitorReport,
+  notifiedFingerprint?: string | null,
+): Promise<void> {
   if (!stateFile) {
     return;
   }
 
-  const json = `${JSON.stringify(report, null, 2)}\n`;
+  logDecision(`write-state ${stateFile}`);
+  const persisted: PersistedState = notifiedFingerprint
+    ? { ...report, notifiedFingerprint }
+    : { ...report };
+  const json = `${JSON.stringify(persisted, null, 2)}\n`;
   const tmpFile = `${stateFile}.tmp`;
   await mkdir(dirname(stateFile), { recursive: true });
   await writeFile(tmpFile, json, 'utf8');
@@ -143,6 +201,19 @@ function loadBaselineFingerprint(stateFile: string | null): string | null {
   try {
     const raw = readFileSync(stateFile, 'utf8');
     return normalizeBaselineFingerprint(JSON.parse(raw) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+function loadNotifiedFingerprint(stateFile: string | null): string | null {
+  if (!stateFile) {
+    return null;
+  }
+
+  try {
+    const raw = readFileSync(stateFile, 'utf8');
+    return normalizeNotifiedFingerprint(JSON.parse(raw) as unknown);
   } catch {
     return null;
   }
@@ -193,11 +264,13 @@ async function snapshot(args: MonitorArgs): Promise<MonitorReport> {
 }
 
 async function sendNotification(target: string, body: string): Promise<void> {
+  logDecision(`notify target=${target}`);
   runHerdr(['agent', 'send', target, body]);
   const paneId = normalizeHerdrPaneId(runHerdrJson(['agent', 'get', target]));
 
   if (paneId) {
     runHerdr(['pane', 'send-keys', paneId, 'Return']);
+    logDecision(`sent-return pane=${paneId}`);
     return;
   }
 
@@ -220,11 +293,15 @@ async function main(): Promise<void> {
   }
 
   const baselineFingerprint = loadBaselineFingerprint(args.stateFile);
+  const notifyBaselineFingerprint = loadNotifiedFingerprint(args.stateFile);
   let lastFingerprint = baselineFingerprint;
   const notifyMode = Boolean(args.notifyTarget);
 
+  logStartup(args);
+
   while (true) {
     const report = await snapshot(args);
+    logPoll(report);
     if (!notifyMode && (report.fingerprint !== lastFingerprint || !args.quiet)) {
       const payload = args.output === 'json' ? JSON.stringify(report) : formatText(report);
       process.stdout.write(`${payload}\n`);
@@ -233,17 +310,26 @@ async function main(): Promise<void> {
 
     if (notifyMode) {
       if (report.actionRequired || report.terminal) {
-        await writeStateFile(args.stateFile, report);
-        const body = formatNotificationBody(report, args.stateFile);
-        await sendNotification(args.notifyTarget as string, body);
-        process.exit(0);
+        if (report.fingerprint !== notifyBaselineFingerprint) {
+          logDecision(`notify-ready target=${args.notifyTarget}`);
+          await writeStateFile(args.stateFile, report);
+          const body = formatNotificationBody(report, args.stateFile);
+          await sendNotification(args.notifyTarget as string, body);
+          await writeStateFile(args.stateFile, report, report.fingerprint);
+          process.exit(0);
+        }
+        logDecision('duplicate-actionable-or-terminal continue');
       }
+      logDecision('continue');
     } else {
+      logDecision('write-state-and-evaluate');
       await writeStateFile(args.stateFile, report);
 
       if (report.terminal || args.once) {
+        logDecision(report.terminal ? 'exit-terminal' : 'exit-once');
         process.exit(0);
       }
+      logDecision('continue');
     }
 
     await new Promise((resolve) => setTimeout(resolve, args.intervalSeconds * 1000));
@@ -267,6 +353,7 @@ export {
   maxTimestamp,
   normalizeCheckResultsPayload,
   normalizeHerdrPaneId,
+  normalizeNotifiedFingerprint,
   normalizePullRequestPayload,
   parseArgs,
   summarizeChecks,

@@ -5,6 +5,7 @@ import {
   formatNotificationBody,
   normalizeCheckResultsPayload,
   normalizeHerdrPaneId,
+  normalizeNotifiedFingerprint,
   normalizePullRequestPayload,
   parseArgs,
   summarizeChecks,
@@ -65,6 +66,23 @@ test('classifySnapshot flags requested changes as action required', () => {
   assert.equal(report.actionRequired, true);
   assert.equal(report.feedbackPresent, true);
   assert.deepEqual(report.reasons, ['changes_requested', 'feedback_present']);
+});
+
+test('classifySnapshot marks feedback-only reviews as actionable', () => {
+  const report = classifySnapshot({
+    prNumber: 42,
+    prUrl: 'https://github.com/acme/repo/pull/42',
+    state: 'OPEN',
+    reviewDecision: 'REVIEW_REQUIRED',
+    commentCount: 0,
+    reviewCount: 1,
+    checks: [{ bucket: 'pass' }],
+  });
+
+  assert.equal(report.terminal, false);
+  assert.equal(report.feedbackPresent, true);
+  assert.equal(report.actionRequired, true);
+  assert.deepEqual(report.reasons, ['feedback_present']);
 });
 
 test('classifySnapshot treats merged PRs as terminal', () => {
@@ -188,4 +206,10 @@ test('normalizeHerdrPaneId accepts only concrete string pane ids', () => {
   assert.equal(normalizeHerdrPaneId({ result: {} }), null);
   assert.equal(normalizeHerdrPaneId({ result: { agent: {} } }), null);
   assert.equal(normalizeHerdrPaneId({ result: { agent: { pane_id: 123 } } }), null);
+});
+
+test('normalizeNotifiedFingerprint only accepts explicit notified fingerprint markers', () => {
+  assert.equal(normalizeNotifiedFingerprint({ notifiedFingerprint: 'abc' }), 'abc');
+  assert.equal(normalizeNotifiedFingerprint({ fingerprint: 'abc' }), null);
+  assert.equal(normalizeNotifiedFingerprint(null), null);
 });

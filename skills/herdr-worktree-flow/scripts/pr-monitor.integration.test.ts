@@ -13,6 +13,7 @@ const monitorEntry = fileURLToPath(new URL('./pr-monitor.ts', import.meta.url));
 type MonitorRunOptions = {
   env?: Record<string, string>;
   fakeBin?: string;
+  timeoutMs?: number;
 };
 
 function makeFixture(): { dir: string; fakeBin: string; logFile: string } {
@@ -68,6 +69,10 @@ process.exit(2);
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.PR_MONITOR_COMMAND_LOG, JSON.stringify({ cmd: 'herdr', args }) + '\\n');
+if (args[0] === 'agent' && args[1] === 'send' && process.env.PR_MONITOR_HERDR_SEND_FAIL === '1') {
+  process.stderr.write('herdr send failed');
+  process.exit(1);
+}
 if (args[0] === 'agent' && args[1] === 'get') {
   process.stdout.write(process.env.PR_MONITOR_HERDR_GET_JSON || JSON.stringify({ result: { agent: { pane_id: 'pane-1' } } }));
   process.exit(0);
@@ -92,6 +97,8 @@ function runMonitor(args: string[], options: MonitorRunOptions = {}) {
   return spawnSync(process.execPath, [tsxRunner, monitorEntry, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
+    timeout: options.timeoutMs,
+    killSignal: 'SIGTERM',
     env: {
       ...process.env,
       PATH: options.fakeBin ? `${options.fakeBin}:${process.env.PATH}` : process.env.PATH,
@@ -144,7 +151,7 @@ test('CLI --once --text emits human-readable report', () => {
   assert.equal(result.status, 0);
   assert.match(result.stdout, /PR#42 OPEN title="Open fixture"/);
   assert.match(result.stdout, /review=REVIEW_REQUIRED checks=pass/);
-  assert.match(result.stdout, /monitoring reasons=feedback_present/);
+  assert.match(result.stdout, /action-required reasons=feedback_present/);
 });
 
 test('CLI writes state files and quiet suppresses unchanged snapshots', () => {
@@ -183,7 +190,11 @@ test('CLI treats gh no-checks-reported failures as an empty check list', () => {
   });
 
   assert.equal(result.status, 0);
-  assert.equal(result.stderr, '');
+  assert.match(result.stderr, /pr-monitor start/);
+  assert.match(result.stderr, /pr-monitor poll/);
+  assert.match(result.stderr, /pr-monitor gh checks normalized empty:/);
+  assert.match(result.stderr, /pr-monitor decision write-state-and-evaluate/);
+  assert.match(result.stderr, /pr-monitor decision exit-once/);
   const report = JSON.parse(result.stdout);
   assert.equal(report.checks.bucket, 'unknown');
   assert.equal(report.checks.total, 0);
@@ -192,6 +203,132 @@ test('CLI treats gh no-checks-reported failures as an empty check list', () => {
   const state = JSON.parse(readFileSync(stateFile, 'utf8'));
   assert.equal(state.checks.total, 0);
   assert.deepEqual(state.checkResults, []);
+});
+
+test('CLI emits stderr diagnostics when gh no-checks is normalized', () => {
+  const fixture = makeFixture();
+  const result = runMonitor(['--once', '--json', '--pr', '5'], {
+    fakeBin: fixture.fakeBin,
+    env: {
+      PR_MONITOR_COMMAND_LOG: fixture.logFile,
+      PR_MONITOR_SCENARIO: 'no-checks',
+    },
+  });
+
+  assert.equal(result.status, 0);
+  assert.match(result.stderr, /pr-monitor start/);
+  assert.match(result.stderr, /pr-monitor poll/);
+  assert.match(result.stderr, /pr-monitor gh checks normalized empty:/);
+  assert.match(result.stderr, /pr-monitor decision write-state-and-evaluate/);
+  assert.match(result.stderr, /pr-monitor decision exit-once/);
+});
+
+test('CLI notification mode sends for feedback-only reviews with passing checks', () => {
+  const fixture = makeFixture();
+  const stateFile = join(fixture.dir, 'state', 'pr-monitor.json');
+  const result = runMonitor(['--pr', '42', '--state-file', stateFile, '--notify-target', 'issue-orchestrator'], {
+    fakeBin: fixture.fakeBin,
+    env: {
+      PR_MONITOR_COMMAND_LOG: fixture.logFile,
+      PR_MONITOR_SCENARIO: 'pass',
+    },
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /pr-monitor start/);
+  assert.match(result.stderr, /pr-monitor poll/);
+  assert.match(result.stderr, /reasons=feedback_present/);
+  assert.match(result.stderr, /actionRequired=true/);
+  assert.match(result.stderr, /pr-monitor decision notify-ready target=issue-orchestrator/);
+  assert.match(result.stderr, /pr-monitor decision notify target=issue-orchestrator/);
+  assert.match(result.stderr, /pr-monitor decision sent-return pane=pane-1/);
+
+  const state = JSON.parse(readFileSync(stateFile, 'utf8'));
+  assert.equal(state.actionRequired, true);
+  assert.deepEqual(state.reasons, ['feedback_present']);
+  assert.equal(state.notifiedFingerprint, state.fingerprint);
+
+  const herdrCommands = readCommands(fixture.logFile).filter((command) => command.cmd === 'herdr');
+  assert.equal(herdrCommands.length, 3);
+  assert.deepEqual(herdrCommands[0].args.slice(0, 3), ['agent', 'send', 'issue-orchestrator']);
+  assert.deepEqual(herdrCommands[1].args, ['agent', 'get', 'issue-orchestrator']);
+  assert.deepEqual(herdrCommands[2].args, ['pane', 'send-keys', 'pane-1', 'Return']);
+});
+
+test('CLI notify mode does not resend a duplicate actionable snapshot from the loaded state file', () => {
+  const fixture = makeFixture();
+  const stateFile = join(fixture.dir, 'state', 'pr-monitor.json');
+
+  const seed = runMonitor(['--pr', '42', '--state-file', stateFile, '--notify-target', 'issue-orchestrator'], {
+    fakeBin: fixture.fakeBin,
+    env: {
+      PR_MONITOR_COMMAND_LOG: fixture.logFile,
+      PR_MONITOR_SCENARIO: 'pass',
+    },
+  });
+
+  assert.equal(seed.status, 0);
+  const seededState = JSON.parse(readFileSync(stateFile, 'utf8'));
+  assert.equal(seededState.notifiedFingerprint, seededState.fingerprint);
+
+  writeFileSync(fixture.logFile, '');
+
+  const result = runMonitor(['--interval', '0.05', '--pr', '42', '--state-file', stateFile, '--notify-target', 'issue-orchestrator'], {
+    fakeBin: fixture.fakeBin,
+    timeoutMs: 500,
+    env: {
+      PR_MONITOR_COMMAND_LOG: fixture.logFile,
+      PR_MONITOR_SCENARIO: 'pass',
+    },
+  });
+
+  assert.equal(result.status, null);
+  assert.equal(result.error?.name, 'Error');
+  assert.equal(result.error?.code, 'ETIMEDOUT');
+  assert.match(result.stderr, /pr-monitor start/);
+  assert.match(result.stderr, /pr-monitor poll/);
+  assert.match(result.stderr, /reasons=feedback_present/);
+  assert.match(result.stderr, /actionRequired=true/);
+  assert.match(result.stderr, /duplicate-actionable-or-terminal continue/);
+
+  const commands = readCommands(fixture.logFile);
+  assert.equal(commands.filter((command) => command.cmd === 'herdr').length, 0);
+});
+
+test('CLI notify mode retries after Herdr send fails before notified marker is written', () => {
+  const fixture = makeFixture();
+  const stateFile = join(fixture.dir, 'state', 'pr-monitor.json');
+
+  const first = runMonitor(['--pr', '42', '--state-file', stateFile, '--notify-target', 'issue-orchestrator'], {
+    fakeBin: fixture.fakeBin,
+    env: {
+      PR_MONITOR_COMMAND_LOG: fixture.logFile,
+      PR_MONITOR_SCENARIO: 'pass',
+      PR_MONITOR_HERDR_SEND_FAIL: '1',
+    },
+  });
+
+  assert.equal(first.status, 1);
+  assert.match(first.stderr, /herdr send failed/);
+
+  const firstState = JSON.parse(readFileSync(stateFile, 'utf8'));
+  assert.equal(firstState.notifiedFingerprint, undefined);
+
+  writeFileSync(fixture.logFile, '');
+
+  const second = runMonitor(['--pr', '42', '--state-file', stateFile, '--notify-target', 'issue-orchestrator'], {
+    fakeBin: fixture.fakeBin,
+    env: {
+      PR_MONITOR_COMMAND_LOG: fixture.logFile,
+      PR_MONITOR_SCENARIO: 'pass',
+    },
+  });
+
+  assert.equal(second.status, 0);
+  const commands = readCommands(fixture.logFile).filter((command) => command.cmd === 'herdr');
+  assert.equal(commands.length, 3);
+  assert.deepEqual(commands[0].args.slice(0, 3), ['agent', 'send', 'issue-orchestrator']);
 });
 
 test('CLI --once exits after terminal merged snapshots', () => {

@@ -219,6 +219,13 @@ export function normalizeBaselineFingerprint(value: unknown): string | null {
   return typeof value.fingerprint === 'string' ? value.fingerprint : null;
 }
 
+export function normalizeNotifiedFingerprint(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  return typeof value.notifiedFingerprint === 'string' ? value.notifiedFingerprint : null;
+}
+
 export function normalizeHerdrPaneId(value: unknown): string | null {
   if (!isRecord(value)) {
     return null;
@@ -447,11 +454,16 @@ export function classifySnapshot(snapshot: PullRequestSnapshot): MonitorReport {
     snapshot.latestCommentAt,
     snapshot.latestReviewAt,
   ]);
+  const feedbackPresent = commentCount > 0 || reviewCount > 0;
 
   const actionRequired =
-    !terminal && (reviewDecision === 'CHANGES_REQUESTED' || checks.bucket === 'fail' || checks.bucket === 'cancel');
-
-  const feedbackPresent = commentCount > 0 || reviewCount > 0;
+    !terminal
+    && (
+      reviewDecision === 'CHANGES_REQUESTED'
+      || checks.bucket === 'fail'
+      || checks.bucket === 'cancel'
+      || feedbackPresent
+    );
 
   const reasons: NotificationReason[] = [];
   if (terminal) {
