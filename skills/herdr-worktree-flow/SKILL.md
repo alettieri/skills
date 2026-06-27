@@ -16,7 +16,7 @@ Do not create the issue here. If there is no issue number, URL, or unambiguous e
 - **Implementer agent**: makes code changes. Prefer the `/implement` skill when available and appropriate.
 - **Review orchestrator**: runs in the dedicated review tab, dispatches the `/review-pr` lenses internally, and reports one synthesized findings set back to the issue orchestrator.
 
-The issue orchestrator coordinates the lifecycle and may not directly modify repo-tracked files. If implementation blocks, it must re-dispatch work, resolve the blocker within the worktree, or report the blocker to the main orchestrator. It does not take over the code change itself.
+The issue orchestrator coordinates the lifecycle but does not take over implementation work. If implementation blocks, it re-dispatches work, resolves the blocker within the worktree, or reports the blocker to the main orchestrator.
 
 ## Agent Tab Topology
 
@@ -28,21 +28,20 @@ The issue workspace uses three Codex agent tabs:
 
 The issue orchestrator communicates with the implementer and review orchestrator. Do not launch the implementer or review orchestrator as split panes inside the issue orchestrator tab. Do not create a separate shipping orchestrator; shipping remains the issue orchestrator's responsibility.
 
-PR monitor tabs and processes are not Codex agent tabs. They may run as dedicated script processes in the issue workspace, but they do not count as orchestrators and do not receive model flags.
+PR monitor tabs and processes are not Codex agent tabs; they are dedicated script processes in the issue workspace.
 
-## Workspace State File
+## Local Agent State
 
-The issue orchestrator must maintain a local state file at `.agent/herdr-worktree-flow.json` for Herdr workspace handles that need to be reused across the lifecycle.
+The issue orchestrator maintains two local state files under `.agent/`:
 
-Record the workspace id and the tab, pane, terminal, and agent targets for the three Codex agent tabs:
+- `.agent/issue-lifecycle.md`: narrative status log for handoff and recovery.
+- `.agent/herdr-worktree-flow.json`: machine-readable Herdr workspace handles for tab reuse and agent communication.
 
-- issue orchestrator
-- implementer
-- review orchestrator
+The lifecycle log should record the issue reference, branch, expected and actual launch mode/model for each spawned agent, agents launched, implementation summary, review verdicts, verification outcomes, PR URL, and PR feedback cycles.
 
-Use the state file to decide whether to create or reuse the implementer and review tabs, and to find the correct Herdr target when sending handoff, review, or fix instructions. Use `agentName` or `terminalId` for `herdr agent send`; use `tabId` for tab reuse/focus; use `paneId` for pane reads or pane-level input when needed.
+The workspace state file should record the workspace id and the tab, pane, terminal, and agent targets for the issue orchestrator, implementer, and review orchestrator. Use it to decide whether to create or reuse the implementer and review tabs, and to find the correct Herdr target when sending handoff, review, or fix instructions. Use `agentName` or `terminalId` for `herdr agent send`; use `tabId` for tab reuse/focus; use `paneId` for pane reads or pane-level input when needed.
 
-Example shape:
+Example workspace state shape:
 
 ```json
 {
@@ -70,7 +69,7 @@ Example shape:
 }
 ```
 
-The state file is local agent state. Do not commit it unless the repository already tracks similar agent handoff files.
+These files are local agent state. Do not commit them unless the repository already tracks similar agent handoff files.
 
 ## Agent Launch Policy
 
@@ -115,7 +114,7 @@ Write one canonical briefing file into the worktree before handoff. The issue or
    - worktree path
    - expected branch name
    - any PRD/spec links
-   - instruction to keep a local lifecycle log
+   - instruction to keep the local agent state files
 
 Use Herdr primitives such as:
 
@@ -126,7 +125,7 @@ herdr agent start issue-orchestrator --cwd <worktree-path> --workspace <workspac
 herdr agent send issue-orchestrator "Read <worktree>/.agent/issue-brief.md and start."
 ```
 
-Use tabs, not split panes, all orchestrators. When you split panes, split down.
+Use tabs, not split panes, for all orchestrators. When you split panes for non-agent helper work, split down.
 
 ```bash
 herdr pane split --direction down ...
@@ -141,23 +140,11 @@ The issue orchestrator works through these states:
 
 `dispatched -> implementing -> reviewing -> fixing -> verified -> pushed -> pr-monitoring -> done`
 
-For durable state, maintain a short local lifecycle log in the worktree, under `.agent/issue-lifecycle.md`. The log should record:
-
-- issue reference and branch
-- expected launch mode and model for each spawned agent
-- actual launch mode and model for each spawned agent
-- agents launched
-- implementation summary
-- review verdicts and blocking findings
-- verification commands and outcomes
-- PR URL
-- PR feedback cycles
-
-Do not commit the lifecycle log unless the repo already tracks similar agent handoff files.
+Keep `.agent/issue-lifecycle.md` and `.agent/herdr-worktree-flow.json` current as described in Local Agent State.
 
 ### 4. Implement
 
-1. Create or reuse the dedicated implementer tab in the issue workspace.
+1. Create or reuse the dedicated implementer tab recorded in `.agent/herdr-worktree-flow.json`.
 2. Start a separate implementer agent in that tab, with `--cwd` set to the worktree path.
 3. Launch with: `codex -a never -s workspace-write -m gpt-5.4-mini`.
 4. Instruct to use `/implement` when available.
@@ -167,7 +154,7 @@ Do not commit the lifecycle log unless the repo already tracks similar agent han
 
 ### 5. Review before committing
 
-Create or reuse the dedicated review tab before the final commit. Start the review orchestrator with `codex -a never -s workspace-write -m gpt-5.5`. Before a PR exists, it runs the `/review-pr` lenses internally against the local diff; once a PR exists, it uses `/review-pr` directly. Review passes when there are no Block or Major findings. Minor findings may be fixed at the issue orchestrator's discretion. Nits are non-blocking.
+Create or reuse the dedicated review tab recorded in `.agent/herdr-worktree-flow.json` before the final commit. Start the review orchestrator with `codex -a never -s workspace-write -m gpt-5.5`. Before a PR exists, it runs the `/review-pr` lenses internally against the local diff; once a PR exists, it uses `/review-pr` directly. Review passes when there are no Block or Major findings. Minor findings may be fixed at the issue orchestrator's discretion. Nits are non-blocking.
 
 For Block or Major findings:
 
@@ -200,7 +187,7 @@ Use the bundled PR monitor script as the authoritative loop:
 node scripts/pr-monitor.mjs --pr <pr-ref> --state-file <worktree>/.agent/pr-monitor.json --notify-target <herdr-target>
 ```
 
-Run it in a dedicated Herdr tab inside the issue workspace. The `--notify-target` value must be a concrete Herdr target from `herdr agent list` (agent name, terminal id, or detected label), not a tab id. Do not attach a model flag here because the PR monitor is a script process, not a Codex agent.
+Run it in a dedicated Herdr tab inside the issue workspace. The `--notify-target` value must be a concrete Herdr target from `herdr agent list` (agent name, terminal id, or detected label), not a tab id.
 
 ```bash
 herdr agent list
@@ -210,7 +197,7 @@ Treat its output and state file as the source of truth for the PR lifecycle. The
 `agent send` is submitted with a return so the target receives it as an actionable prompt.
 
 1. Treat the feedback as new implementation input.
-2. Dispatch an implementer agent in an implementation tab to address it.
+2. Dispatch the implementer agent in the dedicated implementation tab to address it.
 3. Have the review orchestrator rerun its internal review cycle.
 4. Run required checks.
 5. Commit and push fixes when review passes.
@@ -222,12 +209,9 @@ Stop when the PR is merged, closed, or the loop is blocked by missing credential
 
 - Keep implementation isolated in the worktree; do not mix it back into the source checkout.
 - Consume an existing issue. Planning and issue creation belong to the main orchestrator before this skill starts.
-- Keep the issue orchestrator separate from the implementer by default.
-- All Codex agents spawned by this workflow must be launched with `codex -a never -s workspace-write`.
-- The issue orchestrator must spawn or reuse one implementer tab and one review tab within the issue workspace.
-- The issue orchestrator must preserve this same launch policy for the implementer and review orchestrator, including the explicit model selection for each role.
+- Keep the issue orchestrator, implementer, and review orchestrator in their dedicated tabs.
+- Preserve the Agent Launch Policy for every Codex agent, and treat configured model launch failure as a blocker.
 - The issue orchestrator owns verification, commit, push, PR creation, and PR monitoring coordination. Do not spawn a separate shipping orchestrator.
-- The issue orchestrator must treat a configured model launch failure as a blocker and must never silently fall back to another model.
 - Treat review as an independent pass, not a second look by the implementer.
 - Use `/review-pr` as the internal review contract.
 - Treat Nits as non-blocking. Treat Block and Major findings as required fixes.
@@ -242,9 +226,6 @@ Stop when the PR is merged, closed, or the loop is blocked by missing credential
 ## Practical Defaults
 
 - Use a descriptive branch name derived from the issue or task.
-- Use one primary tab for the issue orchestrator.
-- Use one dedicated implementer tab and reuse it for implementation and fix cycles.
-- Use one dedicated review orchestrator tab and reuse it for review cycles.
-- Use a single local lifecycle log for handoff and recovery.
+- Use the three-tab topology and local state files described above.
 - Surface blockers immediately if the environment cannot support the requested workflow.
 - Report the worktree path, branch, PR URL, latest commit, and final PR state when the lifecycle stops.
