@@ -84,7 +84,7 @@ herdr agent start issue-orchestrator --cwd <worktree-path> --workspace <workspac
 herdr agent send issue-orchestrator "Read <worktree>/.agent/issue-brief.md and start."
 ```
 
-Use tabs, not split panes, for the implementer and review orchestrator. Split panes are only for non-agent helper work where a separate tab is not needed. When you split panes, split down:
+Use tabs, not split panes, all orchestrators. When you split panes, split down.
 
 ```bash
 herdr pane split --direction down ...
