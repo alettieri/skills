@@ -30,6 +30,48 @@ The issue orchestrator communicates with the implementer and review orchestrator
 
 PR monitor tabs and processes are not Codex agent tabs. They may run as dedicated script processes in the issue workspace, but they do not count as orchestrators and do not receive model flags.
 
+## Workspace State File
+
+The issue orchestrator must maintain a local state file at `.agent/herdr-worktree-flow.json` for Herdr workspace handles that need to be reused across the lifecycle.
+
+Record the workspace id and the tab, pane, terminal, and agent targets for the three Codex agent tabs:
+
+- issue orchestrator
+- implementer
+- review orchestrator
+
+Use the state file to decide whether to create or reuse the implementer and review tabs, and to find the correct Herdr target when sending handoff, review, or fix instructions. Use `agentName` or `terminalId` for `herdr agent send`; use `tabId` for tab reuse/focus; use `paneId` for pane reads or pane-level input when needed.
+
+Example shape:
+
+```json
+{
+  "workspaceId": "wP",
+  "tabs": {
+    "issueOrchestrator": {
+      "tabId": "wP:t1",
+      "paneId": "wP:p1",
+      "terminalId": "term_...",
+      "agentName": "issue-6-orchestrator"
+    },
+    "implementer": {
+      "tabId": "wP:t2",
+      "paneId": "wP:p2",
+      "terminalId": "term_...",
+      "agentName": "issue-6-implementer"
+    },
+    "review": {
+      "tabId": "wP:t3",
+      "paneId": "wP:p3",
+      "terminalId": "term_...",
+      "agentName": "issue-6-reviewer"
+    }
+  }
+}
+```
+
+The state file is local agent state. Do not commit it unless the repository already tracks similar agent handoff files.
+
 ## Agent Launch Policy
 
 All Codex agents in this workflow must launch with explicit flags for approval mode, sandbox mode, and model selection.
@@ -117,8 +159,8 @@ Do not commit the lifecycle log unless the repo already tracks similar agent han
 
 1. Create or reuse the dedicated implementer tab in the issue workspace.
 2. Start a separate implementer agent in that tab, with `--cwd` set to the worktree path.
-3. Launch it with `codex -a never -s workspace-write -m gpt-5.4-mini`.
-4. Instruct it to use `/implement` when available.
+3. Launch with: `codex -a never -s workspace-write -m gpt-5.4-mini`.
+4. Instruct to use `/implement` when available.
 5. Scope implementation to the issue. It may update tests, docs, migrations, and supporting code required by the issue, but should avoid unrelated cleanup.
 6. Wait for the implementer to become idle or blocked.
 7. If blocked, the issue orchestrator resolves the blocker when possible or reports it to the main orchestrator.
