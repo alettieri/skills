@@ -13,9 +13,9 @@ See [Skills Index](./skills/README.md) to learn about skills in this project.
 - Add or update tests for any behavior change.
 
 ## Common commands
-- `npm run pr-monitor:help`
-- `npm test`
-- `npm run tsx -- skills/herdr-worktree-flow/scripts/pr-monitor.ts --help`
+- `node skills/herdr-worktree-flow/scripts/pr-monitor.ts --help`
+- `node --test skills/herdr-worktree-flow/scripts/*.test.ts`
+- `cd skills/herdr-worktree-flow && node scripts/pr-monitor.ts --help`
 
 ## Style
 - Match local style: ESM JavaScript/TypeScript, 2-space indentation, explicit naming.

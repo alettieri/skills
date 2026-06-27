@@ -9,5 +9,5 @@ This directory contains the repository’s skills.
 - Inputs: issue number/URL and PR workflow context from the project.
 - Primary docs:
   - `SKILL.md` (handoff and lifecycle contract)
-  - `scripts/pr-monitor.ts` (monitoring and one-shot notification behavior, run with the repo-local `tsx` runner)
+  - `scripts/pr-monitor.ts` (monitoring and one-shot notification behavior, run with direct `node`)
 - Notes: Keep modifications inside the skill folder unless a shared repository policy change is required.

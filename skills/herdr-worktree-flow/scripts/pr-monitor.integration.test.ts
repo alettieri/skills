@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
-const tsxRunner = join(repoRoot, 'scripts/tsx.mjs');
 const monitorEntry = fileURLToPath(new URL('./pr-monitor.ts', import.meta.url));
 
 type MonitorRunOptions = {
@@ -94,7 +93,7 @@ function writeExecutable(path: string, contents: string): void {
 }
 
 function runMonitor(args: string[], options: MonitorRunOptions = {}) {
-  return spawnSync(process.execPath, [tsxRunner, monitorEntry, ...args], {
+  return spawnSync(process.execPath, [monitorEntry, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
     timeout: options.timeoutMs,
