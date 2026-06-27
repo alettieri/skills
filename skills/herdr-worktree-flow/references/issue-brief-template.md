@@ -10,7 +10,7 @@ Use this as the canonical handoff document the main orchestrator writes into the
 - Goal summary
 - Acceptance criteria
 - Constraints and non-goals
-- Preferred agent model
+- Launch policy and model selection
 - Current state and next action
 
 ## Suggested content
@@ -35,9 +35,14 @@ Constraints:
 - Stay within scope.
 - Use the worktree only.
 
-Preferred agent model:
-- Implementer: gpt-4o-mini
-- Reviewers: gpt-4o-mini
+Launch policy:
+- Approval mode: `never`
+- Sandbox mode: `workspace-write`
+- Issue orchestrator: `codex -a never -s workspace-write -m gpt-5.5`
+- Implementer: `codex -a never -s workspace-write -m gpt-5.4-mini`
+- Review orchestrator: `codex -a never -s workspace-write -m gpt-5.5`
+- PR monitor: no model flag because it is a script process
+- Silent fallback is forbidden; treat launch failure as a blocker.
 
 Current state:
 - Main orchestrator has created the worktree and is handing off.

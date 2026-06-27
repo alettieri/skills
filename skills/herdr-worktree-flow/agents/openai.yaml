@@ -1,4 +1,4 @@
 interface:
   display_name: "Herdr Worktree Flow"
   short_description: "Run issue worktree implementation loops"
-  default_prompt: "Use $herdr-worktree-flow to write the issue brief file, hand off the issue orchestrator, run independent review/fix loops with gpt-4o-mini, use the bundled PR monitor script, push a PR, and continue until merge or close."
+  default_prompt: "Use $herdr-worktree-flow to write the issue brief file, hand off the issue orchestrator with codex -a never -s workspace-write -m gpt-5.5, run implementer loops with codex -a never -s workspace-write -m gpt-5.4-mini, run review orchestrator loops with codex -a never -s workspace-write -m gpt-5.5, use the bundled PR monitor script without a model flag, push a PR, and continue until merge or close."
