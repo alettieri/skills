@@ -77,9 +77,9 @@ All Codex agents in this workflow must launch with explicit flags for approval m
 
 - Approval mode: `never`
 - Sandbox mode: `workspace-write`
-- Issue orchestrator: `codex -a never -s workspace-write -m gpt-5.5`
-- Implementer agent: `codex -a never -s workspace-write -m gpt-5.4-mini`
-- Review orchestrator: `codex -a never -s workspace-write -m gpt-5.5`
+- Issue orchestrator: `codex -a never -m gpt-5.5`
+- Implementer agent: `codex -a never -m gpt-5.4-mini`
+- Review orchestrator: `codex -a never -m gpt-5.5`
 - PR monitor tabs and processes do not receive model flags because `scripts/pr-monitor.mjs` is a script process, not a Codex agent.
 
 If a configured model is unavailable or the launch command fails, treat that as a blocker and report it. Do not silently fall back to another model, omit the model flag, or downgrade the launch policy without an explicit decision.
@@ -121,7 +121,7 @@ Use Herdr primitives such as:
 ```bash
 herdr worktree create --cwd <repo> --branch <branch> --base <base> --label "<issue label>" --focus --json
 herdr tab create --workspace <workspace-id> --cwd <worktree-path> --label "orchestrator" --focus
-herdr agent start issue-orchestrator --cwd <worktree-path> --workspace <workspace-id> --tab <orchestrator-tab-id> -- codex -a never -s workspace-write -m gpt-5.5
+herdr agent start issue-orchestrator --cwd <worktree-path> --workspace <workspace-id> --tab <orchestrator-tab-id> -- codex -a never -m gpt-5.5
 herdr agent send issue-orchestrator "Read <worktree>/.agent/issue-brief.md and start."
 ```
 
@@ -146,7 +146,7 @@ Keep `.agent/issue-lifecycle.md` and `.agent/herdr-worktree-flow.json` current a
 
 1. Create or reuse the dedicated implementer tab recorded in `.agent/herdr-worktree-flow.json`.
 2. Start a separate implementer agent in that tab, with `--cwd` set to the worktree path.
-3. Launch with: `codex -a never -s workspace-write -m gpt-5.4-mini`.
+3. Launch with: `codex -a never -m gpt-5.4-mini`.
 4. Instruct to use `/implement` when available.
 5. Scope implementation to the issue. It may update tests, docs, migrations, and supporting code required by the issue, but should avoid unrelated cleanup.
 6. Wait for the implementer to become idle or blocked.
@@ -154,7 +154,7 @@ Keep `.agent/issue-lifecycle.md` and `.agent/herdr-worktree-flow.json` current a
 
 ### 5. Review before committing
 
-Create or reuse the dedicated review tab recorded in `.agent/herdr-worktree-flow.json` before the final commit. Start the review orchestrator with `codex -a never -s workspace-write -m gpt-5.5`. Before a PR exists, it runs the `/review-pr` lenses internally against the local diff; once a PR exists, it uses `/review-pr` directly. Review passes when there are no Block or Major findings. Minor findings may be fixed at the issue orchestrator's discretion. Nits are non-blocking.
+Create or reuse the dedicated review tab recorded in `.agent/herdr-worktree-flow.json` before the final commit. Start the review orchestrator with `codex -a never -m gpt-5.5`. Before a PR exists, it runs the `/review-pr` lenses internally against the local diff; once a PR exists, it uses `/review-pr` directly. Review passes when there are no Block or Major findings. Minor findings may be fixed at the issue orchestrator's discretion. Nits are non-blocking.
 
 For Block or Major findings:
 
