@@ -79,15 +79,15 @@ These files are local agent state. Do not commit them unless the repository alre
 All Codex agents in this workflow must launch through `herdr agent start` with explicit Codex approval/model flags, then move the returned pane into a dedicated role tab.
 
 - Approval mode: `never`
-- Issue orchestrator: `codex -a never -m gpt-5.5`
-- Implementer agent: `codex -a never -m gpt-5.4-mini`
-- Review orchestrator: `codex -a never -m gpt-5.5`
+- Issue orchestrator: `codex -a on-request -m gpt-5.5`
+- Implementer agent: `codex -a on-request -m gpt-5.4-mini`
+- Review orchestrator: `codex -a on-request -m gpt-5.5`
 - PR monitor tabs and processes do not receive model flags because `scripts/pr-monitor.mjs` is a script process, not a Codex agent.
 
 Use this Herdr command shape for every Codex agent:
 
 ```bash
-herdr agent start <agent-name> --cwd <worktree-path> --workspace <workspace-id> -- codex -a never -m <model>
+herdr agent start <agent-name> --cwd <worktree-path> --workspace <workspace-id> -- codex -a on-request -m <model>
 herdr pane move <returned-pane-id> --new-tab --workspace <workspace-id> --label "<role-label>"
 ```
 
@@ -130,7 +130,7 @@ Use Herdr primitives such as:
 ```bash
 herdr worktree create --cwd <repo> --branch <branch> --base <base> --label "<issue label>" --focus --json
 
-herdr agent start issue-orchestrator --cwd <worktree-path> --workspace <workspace-id> -- codex -a never -m gpt-5.5
+herdr agent start issue-orchestrator --cwd <worktree-path> --workspace <workspace-id> -- codex -a on-request -m gpt-5.5
 herdr pane move <returned-pane-id> --new-tab --workspace <workspace-id> --label "orchestrator"
 herdr agent send issue-orchestrator "Read <worktree>/.agent/issue-brief.md and start."
 ```
@@ -158,7 +158,7 @@ Keep `.agent/issue-lifecycle.md` and `.agent/herdr-worktree-flow.json` current a
 2. Move the returned implementer pane into a new dedicated implementer tab:
 
 ```bash
-herdr agent start <issue-label>-implementer --cwd <worktree-path> --workspace <workspace-id> -- codex -a never -m gpt-5.4-mini
+herdr agent start <issue-label>-implementer --cwd <worktree-path> --workspace <workspace-id> -- codex -a on-request -m gpt-5.4-mini
 herdr pane move <returned-pane-id> --new-tab --workspace <workspace-id> --label "implementer"
 ```
 
@@ -173,7 +173,7 @@ herdr pane move <returned-pane-id> --new-tab --workspace <workspace-id> --label 
 Reuse the existing review orchestrator recorded in `.agent/herdr-worktree-flow.json` when it exists and is usable; otherwise start a new review orchestrator before the final commit with the full launch policy and move its returned pane into a new dedicated review tab:
 
 ```bash
-herdr agent start <issue-label>-reviewer --cwd <worktree-path> --workspace <workspace-id> -- codex -a never -m gpt-5.5
+herdr agent start <issue-label>-reviewer --cwd <worktree-path> --workspace <workspace-id> -- codex -a on-request -m gpt-5.5
 herdr pane move <returned-pane-id> --new-tab --workspace <workspace-id> --label "review"
 ```
 
