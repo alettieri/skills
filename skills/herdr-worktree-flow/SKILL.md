@@ -210,7 +210,7 @@ Use the bundled PR monitor script as the authoritative loop:
 node skills/herdr-worktree-flow/scripts/pr-monitor.ts --pr <pr-ref> --state-file <worktree>/.agent/pr-monitor.json --notify-target <herdr-target>
 ```
 
-Run it in a dedicated Herdr tab inside the issue workspace. The `--notify-target` value must be a concrete Herdr target from `herdr agent list` (agent name, terminal id, or detected label), not a tab id.
+Run it in a dedicated Herdr tab inside the issue workspace. The `--notify-target` value must be the issue orchestrator agent target recorded at `.agent/herdr-worktree-flow.json` under `tabs.issueOrchestrator.agentName`, not the PR monitor tab id, pane id, terminal id, or another shell target.
 
 ```bash
 herdr agent list

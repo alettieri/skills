@@ -73,7 +73,7 @@ if (args[0] === 'agent' && args[1] === 'send' && process.env.PR_MONITOR_HERDR_SE
   process.exit(1);
 }
 if (args[0] === 'agent' && args[1] === 'get') {
-  process.stdout.write(process.env.PR_MONITOR_HERDR_GET_JSON || JSON.stringify({ result: { agent: { pane_id: 'pane-1' } } }));
+  process.stdout.write(process.env.PR_MONITOR_HERDR_GET_JSON || JSON.stringify({ result: { agent: { agent: 'codex', pane_id: 'pane-1' } } }));
   process.exit(0);
 }
 process.exit(0);
@@ -250,8 +250,8 @@ test('CLI notification mode sends for feedback-only reviews with passing checks'
 
   const herdrCommands = readCommands(fixture.logFile).filter((command) => command.cmd === 'herdr');
   assert.equal(herdrCommands.length, 3);
-  assert.deepEqual(herdrCommands[0].args.slice(0, 3), ['agent', 'send', 'issue-orchestrator']);
-  assert.deepEqual(herdrCommands[1].args, ['agent', 'get', 'issue-orchestrator']);
+  assert.deepEqual(herdrCommands[0].args, ['agent', 'get', 'issue-orchestrator']);
+  assert.deepEqual(herdrCommands[1].args.slice(0, 3), ['agent', 'send', 'issue-orchestrator']);
   assert.deepEqual(herdrCommands[2].args, ['pane', 'send-keys', 'pane-1', 'Return']);
 });
 
@@ -327,7 +327,8 @@ test('CLI notify mode retries after Herdr send fails before notified marker is w
   assert.equal(second.status, 0);
   const commands = readCommands(fixture.logFile).filter((command) => command.cmd === 'herdr');
   assert.equal(commands.length, 3);
-  assert.deepEqual(commands[0].args.slice(0, 3), ['agent', 'send', 'issue-orchestrator']);
+  assert.deepEqual(commands[0].args, ['agent', 'get', 'issue-orchestrator']);
+  assert.deepEqual(commands[1].args.slice(0, 3), ['agent', 'send', 'issue-orchestrator']);
 });
 
 test('CLI --once exits after terminal merged snapshots', () => {
@@ -365,9 +366,9 @@ test('CLI notification mode writes state, sends one Herdr message, and presses R
 
   const herdrCommands = readCommands(fixture.logFile).filter((command) => command.cmd === 'herdr');
   assert.equal(herdrCommands.length, 3);
-  assert.deepEqual(herdrCommands[0].args.slice(0, 3), ['agent', 'send', 'issue-orchestrator']);
-  assert.match(herdrCommands[0].args[3], /Reason: failing_checks/);
-  assert.deepEqual(herdrCommands[1].args, ['agent', 'get', 'issue-orchestrator']);
+  assert.deepEqual(herdrCommands[0].args, ['agent', 'get', 'issue-orchestrator']);
+  assert.deepEqual(herdrCommands[1].args.slice(0, 3), ['agent', 'send', 'issue-orchestrator']);
+  assert.match(herdrCommands[1].args[3], /Reason: failing_checks/);
   assert.deepEqual(herdrCommands[2].args, ['pane', 'send-keys', 'pane-1', 'Return']);
 });
 
@@ -376,6 +377,7 @@ for (const [name, payload] of [
   ['array', '[]'],
   ['missing pane id', '{"result":{"agent":{}}}'],
   ['non-string pane id', '{"result":{"agent":{"pane_id":123}}}'],
+  ['shell pane', '{"result":{"agent":{"pane_id":"pane-1"}}}'],
 ] as const) {
   test(`CLI notification mode rejects malformed herdr agent get JSON: ${name}`, () => {
     const fixture = makeFixture();
@@ -389,6 +391,9 @@ for (const [name, payload] of [
     });
 
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /herdr send target issue-orchestrator has no pane_id; cannot send Return/);
+    assert.match(result.stderr, /herdr send target issue-orchestrator does not resolve to a Codex agent/);
+    const commands = readCommands(fixture.logFile).filter((command) => command.cmd === 'herdr');
+    assert.equal(commands.length, 1);
+    assert.deepEqual(commands[0].args, ['agent', 'get', 'issue-orchestrator']);
   });
 }

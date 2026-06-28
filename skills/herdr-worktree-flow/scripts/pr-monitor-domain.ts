@@ -91,6 +91,10 @@ export type PullRequestPayload = {
   reviews: ExternalReview[];
 };
 
+export type HerdrAgentTarget = {
+  paneId: string;
+};
+
 export type ExternalComment = {
   createdAt?: string | null;
 };
@@ -226,7 +230,7 @@ export function normalizeNotifiedFingerprint(value: unknown): string | null {
   return typeof value.notifiedFingerprint === 'string' ? value.notifiedFingerprint : null;
 }
 
-export function normalizeHerdrPaneId(value: unknown): string | null {
+export function normalizeHerdrAgentTarget(value: unknown): HerdrAgentTarget | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -238,8 +242,11 @@ export function normalizeHerdrPaneId(value: unknown): string | null {
   if (!isRecord(agent)) {
     return null;
   }
+  if (agent.agent !== 'codex') {
+    return null;
+  }
   const paneId = agent.pane_id;
-  return typeof paneId === 'string' && paneId.length > 0 ? paneId : null;
+  return typeof paneId === 'string' && paneId.length > 0 ? { paneId } : null;
 }
 
 export function parseArgs(argv: string[]): MonitorArgs {

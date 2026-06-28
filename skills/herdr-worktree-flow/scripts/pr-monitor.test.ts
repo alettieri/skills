@@ -4,7 +4,7 @@ import {
   classifySnapshot,
   formatNotificationBody,
   normalizeCheckResultsPayload,
-  normalizeHerdrPaneId,
+  normalizeHerdrAgentTarget,
   normalizeNotifiedFingerprint,
   normalizePullRequestPayload,
   parseArgs,
@@ -198,14 +198,17 @@ test('normalizeCheckResultsPayload treats non-array gh checks payloads as no che
   assert.deepEqual(normalizeCheckResultsPayload(null), []);
 });
 
-test('normalizeHerdrPaneId accepts only concrete string pane ids', () => {
-  assert.equal(normalizeHerdrPaneId({ result: { agent: { pane_id: 'pane-1' } } }), 'pane-1');
-  assert.equal(normalizeHerdrPaneId(null), null);
-  assert.equal(normalizeHerdrPaneId([]), null);
-  assert.equal(normalizeHerdrPaneId({}), null);
-  assert.equal(normalizeHerdrPaneId({ result: {} }), null);
-  assert.equal(normalizeHerdrPaneId({ result: { agent: {} } }), null);
-  assert.equal(normalizeHerdrPaneId({ result: { agent: { pane_id: 123 } } }), null);
+test('normalizeHerdrAgentTarget accepts only concrete Codex agent targets', () => {
+  assert.deepEqual(normalizeHerdrAgentTarget({ result: { agent: { agent: 'codex', pane_id: 'pane-1' } } }), {
+    paneId: 'pane-1',
+  });
+  assert.equal(normalizeHerdrAgentTarget(null), null);
+  assert.equal(normalizeHerdrAgentTarget([]), null);
+  assert.equal(normalizeHerdrAgentTarget({}), null);
+  assert.equal(normalizeHerdrAgentTarget({ result: {} }), null);
+  assert.equal(normalizeHerdrAgentTarget({ result: { agent: {} } }), null);
+  assert.equal(normalizeHerdrAgentTarget({ result: { agent: { pane_id: 'pane-1' } } }), null);
+  assert.equal(normalizeHerdrAgentTarget({ result: { agent: { agent: 'codex', pane_id: 123 } } }), null);
 });
 
 test('normalizeNotifiedFingerprint only accepts explicit notified fingerprint markers', () => {

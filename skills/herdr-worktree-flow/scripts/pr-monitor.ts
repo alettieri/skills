@@ -13,10 +13,10 @@ import {
   maxTimestamp,
   normalizeBaselineFingerprint,
   normalizeCheckResultsPayload,
+  normalizeHerdrAgentTarget,
   normalizePullRequestPayload,
   normalizeNotifiedFingerprint,
   parseArgs,
-  normalizeHerdrPaneId,
 } from './pr-monitor-domain.ts';
 import type { MonitorArgs, MonitorReport } from './pr-monitor-domain.ts';
 
@@ -265,19 +265,18 @@ async function snapshot(args: MonitorArgs): Promise<MonitorReport> {
 
 async function sendNotification(target: string, body: string): Promise<void> {
   logDecision(`notify target=${target}`);
-  runHerdr(['agent', 'send', target, body]);
-  const paneId = normalizeHerdrPaneId(runHerdrJson(['agent', 'get', target]));
+  const agentTarget = normalizeHerdrAgentTarget(runHerdrJson(['agent', 'get', target]));
 
-  if (paneId) {
-    runHerdr(['pane', 'send-keys', paneId, 'Return']);
-    logDecision(`sent-return pane=${paneId}`);
-    return;
+  if (!agentTarget) {
+    throw new Error(
+      `herdr send target ${target} does not resolve to a Codex agent; refusing to send notification.\n`
+      + 'Use the issue orchestrator agent name from `herdr agent list`, not a tab id, pane id, or shell terminal.',
+    );
   }
 
-  throw new Error(
-    `herdr send target ${target} has no pane_id; cannot send Return.\n`
-    + 'Use a concrete Herdr agent target from `herdr agent list`.',
-  );
+  runHerdr(['agent', 'send', target, body]);
+  runHerdr(['pane', 'send-keys', agentTarget.paneId, 'Return']);
+  logDecision(`sent-return pane=${agentTarget.paneId}`);
 }
 
 async function main(): Promise<void> {
@@ -352,7 +351,7 @@ export {
   formatText,
   maxTimestamp,
   normalizeCheckResultsPayload,
-  normalizeHerdrPaneId,
+  normalizeHerdrAgentTarget,
   normalizeNotifiedFingerprint,
   normalizePullRequestPayload,
   parseArgs,
