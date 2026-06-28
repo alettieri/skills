@@ -12,7 +12,7 @@ Do not create the issue here. If there is no issue number, URL, or unambiguous e
 ## Roles
 
 - **Main orchestrator**: verifies the issue exists, creates the Herdr worktree workspace, starts the issue orchestrator, and then steps back unless the issue orchestrator reports a blocker that needs user input.
-- **Issue orchestrator**: runs in the primary tab for the issue worktree and owns the implementation lifecycle end to end.
+- **Issue orchestrator**: runs in a dedicated orchestrator tab for the issue worktree and owns the implementation lifecycle end to end.
 - **Implementer agent**: makes code changes. Prefer the `/implement` skill when available and appropriate.
 - **Review orchestrator**: runs in the dedicated review tab, dispatches the `/review-pr` lenses internally, and reports one synthesized findings set back to the issue orchestrator.
 
@@ -22,11 +22,11 @@ The issue orchestrator coordinates the lifecycle but does not take over implemen
 
 The issue workspace uses three Codex agent tabs:
 
-- Issue orchestrator tab: the primary tab for the issue. The issue orchestrator manages the whole process, including verification, commit, push, PR creation, and PR monitoring coordination.
+- Issue orchestrator tab: one dedicated tab for the issue orchestrator. The issue orchestrator manages the whole process, including verification, commit, push, PR creation, and PR monitoring coordination.
 - Implementer tab: one dedicated tab for the implementer agent. Reuse this tab for implementation and fix cycles.
 - Review tab: one dedicated tab for the review orchestrator. Reuse this tab for review cycles.
 
-The issue orchestrator communicates with the implementer and review orchestrator. Do not launch the implementer or review orchestrator as split panes inside the issue orchestrator tab. Do not create a separate shipping orchestrator; shipping remains the issue orchestrator's responsibility.
+Start each Codex agent, capture the returned `pane_id`, then move that pane into a dedicated role tab with `herdr pane move --new-tab`. The issue orchestrator communicates with the implementer and review orchestrator. Do not launch any Codex role as a split pane inside another role's tab. Do not create a separate shipping orchestrator; shipping remains the issue orchestrator's responsibility.
 
 PR monitor tabs and processes are not Codex agent tabs; they are dedicated script processes in the issue workspace.
 
@@ -39,7 +39,7 @@ The issue orchestrator maintains two local state files under `.agent/`:
 
 The lifecycle log should record the issue reference, branch, expected and actual launch mode/model for each spawned agent, agents launched, implementation summary, review verdicts, verification outcomes, PR URL, and PR feedback cycles.
 
-The workspace state file should record the workspace id and the tab, pane, terminal, and agent targets for the issue orchestrator, implementer, and review orchestrator. Use it to decide whether to create or reuse the implementer and review tabs, and to find the correct Herdr target when sending handoff, review, or fix instructions. Use `agentName` or `terminalId` for `herdr agent send`; use `tabId` for tab reuse/focus; use `paneId` for pane reads or pane-level input when needed.
+The workspace state file should record the workspace id and the tab, pane, terminal, agent, and role label for the issue orchestrator, implementer, and review orchestrator. Use it to decide whether a role already has a dedicated tab, and to find the correct Herdr target when sending handoff, review, or fix instructions. Use `agentName` or `terminalId` for `herdr agent send`; use `tabId` for tab focus; use `paneId` for pane reads or pane-level input when needed.
 
 Example workspace state shape:
 
@@ -51,19 +51,22 @@ Example workspace state shape:
       "tabId": "wP:t1",
       "paneId": "wP:p1",
       "terminalId": "term_...",
-      "agentName": "issue-6-orchestrator"
+      "agentName": "issue-6-orchestrator",
+      "roleLabel": "orchestrator"
     },
     "implementer": {
       "tabId": "wP:t2",
       "paneId": "wP:p2",
       "terminalId": "term_...",
-      "agentName": "issue-6-implementer"
+      "agentName": "issue-6-implementer",
+      "roleLabel": "implementer"
     },
     "review": {
       "tabId": "wP:t3",
       "paneId": "wP:p3",
       "terminalId": "term_...",
-      "agentName": "issue-6-reviewer"
+      "agentName": "issue-6-reviewer",
+      "roleLabel": "review"
     }
   }
 }
@@ -73,16 +76,22 @@ These files are local agent state. Do not commit them unless the repository alre
 
 ## Agent Launch Policy
 
-All Codex agents in this workflow must launch with explicit flags for approval mode, sandbox mode, and model selection.
+All Codex agents in this workflow must launch through `herdr agent start` with explicit Codex approval/model flags, then move the returned pane into a dedicated role tab.
 
 - Approval mode: `never`
-- Sandbox mode: `workspace-write`
 - Issue orchestrator: `codex -a never -m gpt-5.5`
 - Implementer agent: `codex -a never -m gpt-5.4-mini`
 - Review orchestrator: `codex -a never -m gpt-5.5`
 - PR monitor tabs and processes do not receive model flags because `scripts/pr-monitor.mjs` is a script process, not a Codex agent.
 
-If a configured model is unavailable or the launch command fails, treat that as a blocker and report it. Do not silently fall back to another model, omit the model flag, or downgrade the launch policy without an explicit decision.
+Use this Herdr command shape for every Codex agent:
+
+```bash
+herdr agent start <agent-name> --cwd <worktree-path> --workspace <workspace-id> -- codex -a never -m <model>
+herdr pane move <returned-pane-id> --new-tab --workspace <workspace-id> --label "<role-label>"
+```
+
+Do not pass `--tab` or `--split` when starting issue orchestrator, implementer, or review orchestrator agents. If a configured model is unavailable or the launch command fails, treat that as a blocker and report it. Do not silently fall back to another model, omit the model flag, or downgrade the launch policy without an explicit decision.
 
 ## Handoff Model
 
@@ -105,8 +114,8 @@ Write one canonical briefing file into the worktree before handoff. The issue or
 
 1. Derive a descriptive branch name from the issue, following repo conventions when discoverable.
 2. Create a Herdr worktree workspace from the base branch.
-3. Create or use the primary tab for the issue orchestrator in that workspace.
-4. Start an issue orchestrator agent in the primary tab.
+3. Start an issue orchestrator agent in the workspace.
+4. Move the returned issue orchestrator pane into a new dedicated orchestrator tab.
 5. Pass the issue orchestrator:
    - the path to the worktree briefing file, usually `.agent/issue-brief.md` or `.codex/issue-brief.md`
    - issue number/URL
@@ -120,12 +129,13 @@ Use Herdr primitives such as:
 
 ```bash
 herdr worktree create --cwd <repo> --branch <branch> --base <base> --label "<issue label>" --focus --json
-herdr tab create --workspace <workspace-id> --cwd <worktree-path> --label "orchestrator" --focus
-herdr agent start issue-orchestrator --cwd <worktree-path> --workspace <workspace-id> --tab <orchestrator-tab-id> -- codex -a never -m gpt-5.5
+
+herdr agent start issue-orchestrator --cwd <worktree-path> --workspace <workspace-id> -- codex -a never -m gpt-5.5
+herdr pane move <returned-pane-id> --new-tab --workspace <workspace-id> --label "orchestrator"
 herdr agent send issue-orchestrator "Read <worktree>/.agent/issue-brief.md and start."
 ```
 
-Use tabs, not split panes, for all orchestrators. When you split panes for non-agent helper work, split down.
+Use tabs, not split panes, for all Codex agents. Start the agent first, then move its returned pane into a new role tab. Do not pass `--tab` or `--split` when starting issue orchestrator, implementer, or review orchestrator agents. When you split panes for non-agent helper work, split down.
 
 ```bash
 herdr pane split --direction down ...
@@ -144,9 +154,15 @@ Keep `.agent/issue-lifecycle.md` and `.agent/herdr-worktree-flow.json` current a
 
 ### 4. Implement
 
-1. Create or reuse the dedicated implementer tab recorded in `.agent/herdr-worktree-flow.json`.
-2. Start a separate implementer agent in that tab, with `--cwd` set to the worktree path.
-3. Launch with: `codex -a never -m gpt-5.4-mini`.
+1. Reuse the existing implementer agent recorded in `.agent/herdr-worktree-flow.json` when it exists and is usable; otherwise start a new implementer agent with the full launch policy.
+2. Move the returned implementer pane into a new dedicated implementer tab:
+
+```bash
+herdr agent start <issue-label>-implementer --cwd <worktree-path> --workspace <workspace-id> -- codex -a never -m gpt-5.4-mini
+herdr pane move <returned-pane-id> --new-tab --workspace <workspace-id> --label "implementer"
+```
+
+3. Record the implementer `tabId`, `paneId`, `terminalId`, `agentName`, and `roleLabel` in `.agent/herdr-worktree-flow.json`.
 4. Instruct to use `/implement` when available.
 5. Scope implementation to the issue. It may update tests, docs, migrations, and supporting code required by the issue, but should avoid unrelated cleanup.
 6. Wait for the implementer to become idle or blocked.
@@ -154,7 +170,14 @@ Keep `.agent/issue-lifecycle.md` and `.agent/herdr-worktree-flow.json` current a
 
 ### 5. Review before committing
 
-Create or reuse the dedicated review tab recorded in `.agent/herdr-worktree-flow.json` before the final commit. Start the review orchestrator with `codex -a never -m gpt-5.5`. Before a PR exists, it runs the `/review-pr` lenses internally against the local diff; once a PR exists, it uses `/review-pr` directly. Review passes when there are no Block or Major findings. Minor findings may be fixed at the issue orchestrator's discretion. Nits are non-blocking.
+Reuse the existing review orchestrator recorded in `.agent/herdr-worktree-flow.json` when it exists and is usable; otherwise start a new review orchestrator before the final commit with the full launch policy and move its returned pane into a new dedicated review tab:
+
+```bash
+herdr agent start <issue-label>-reviewer --cwd <worktree-path> --workspace <workspace-id> -- codex -a never -m gpt-5.5
+herdr pane move <returned-pane-id> --new-tab --workspace <workspace-id> --label "review"
+```
+
+Record the review orchestrator `tabId`, `paneId`, `terminalId`, `agentName`, and `roleLabel` in `.agent/herdr-worktree-flow.json`. Before a PR exists, it runs the `/review-pr` lenses internally against the local diff; once a PR exists, it uses `/review-pr` directly. Review passes when there are no Block or Major findings. Minor findings may be fixed at the issue orchestrator's discretion. Nits are non-blocking.
 
 For Block or Major findings:
 
@@ -210,6 +233,8 @@ Stop when the PR is merged, closed, or the loop is blocked by missing credential
 - Keep implementation isolated in the worktree; do not mix it back into the source checkout.
 - Consume an existing issue. Planning and issue creation belong to the main orchestrator before this skill starts.
 - Keep the issue orchestrator, implementer, and review orchestrator in their dedicated tabs.
+- Do not launch a Codex role directly into another role's tab with `--tab`.
+- For each Codex role, start the agent, move the returned pane into a new role tab, and record the resulting Herdr handles.
 - Preserve the Agent Launch Policy for every Codex agent, and treat configured model launch failure as a blocker.
 - The issue orchestrator owns verification, commit, push, PR creation, and PR monitoring coordination. Do not spawn a separate shipping orchestrator.
 - Treat review as an independent pass, not a second look by the implementer.
