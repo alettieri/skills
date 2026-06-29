@@ -3,6 +3,7 @@ import { mkdir, writeFile, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { SpawnSyncReturns } from 'node:child_process';
 import {
   HelpRequested,
@@ -20,6 +21,8 @@ import {
 import type { MonitorArgs, MonitorReport } from './pr-monitor-domain.ts';
 
 type CommandResult = SpawnSyncReturns<string>;
+
+const DEFAULT_HERDR_RETURN_DELAY_MS = 250;
 
 function logStderr(message: string): void {
   process.stderr.write(`${message}\n`);
@@ -63,6 +66,20 @@ function logPoll(report: MonitorReport): void {
 
 function logDecision(message: string): void {
   logStderr(`pr-monitor decision ${message}`);
+}
+
+function herdrReturnDelayMs(): number {
+  const raw = process.env.PR_MONITOR_HERDR_RETURN_DELAY_MS;
+  if (raw === undefined) {
+    return DEFAULT_HERDR_RETURN_DELAY_MS;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_HERDR_RETURN_DELAY_MS;
+  }
+
+  return parsed;
 }
 
 export function printHelp(): void {
@@ -274,6 +291,9 @@ async function sendNotification(target: string, body: string): Promise<void> {
   }
 
   runHerdr(['agent', 'send', target, body]);
+  const returnDelayMs = herdrReturnDelayMs();
+  logDecision(`wait-before-return ms=${returnDelayMs}`);
+  await delay(returnDelayMs);
   runHerdr(['pane', 'send-keys', agentTarget.paneId, 'Return']);
   logDecision(`sent-return pane=${agentTarget.paneId}`);
 }

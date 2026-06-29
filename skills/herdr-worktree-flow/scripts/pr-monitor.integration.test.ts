@@ -257,6 +257,7 @@ test('CLI notification mode sends for feedback-only reviews with passing checks'
     env: {
       PR_MONITOR_COMMAND_LOG: fixture.logFile,
       PR_MONITOR_SCENARIO: 'pass',
+      PR_MONITOR_HERDR_RETURN_DELAY_MS: '10',
     },
   });
 
@@ -269,7 +270,12 @@ test('CLI notification mode sends for feedback-only reviews with passing checks'
   assert.match(result.stderr, /actionRequired=true/);
   assert.match(result.stderr, /pr-monitor decision notify-ready target=issue-orchestrator/);
   assert.match(result.stderr, /pr-monitor decision notify target=issue-orchestrator/);
+  assert.match(result.stderr, /pr-monitor decision wait-before-return ms=10/);
   assert.match(result.stderr, /pr-monitor decision sent-return pane=pane-1/);
+  assert.ok(
+    result.stderr.indexOf('pr-monitor decision wait-before-return ms=10')
+      < result.stderr.indexOf('pr-monitor decision sent-return pane=pane-1'),
+  );
 
   const state = JSON.parse(readFileSync(stateFile, 'utf8'));
   assert.equal(state.actionRequired, true);
@@ -334,6 +340,7 @@ test('CLI notify mode sends again when a later actionable fingerprint changes', 
     env: {
       PR_MONITOR_COMMAND_LOG: fixture.logFile,
       PR_MONITOR_SCENARIO_SEQUENCE: 'pass,changes',
+      PR_MONITOR_HERDR_RETURN_DELAY_MS: '0',
     },
   });
 
