@@ -18,7 +18,11 @@ A single delegated unit of work owned by one role, identified by a run id and ca
 
 ## Completion notification
 
-The small machine-readable message that wakes the issue orchestrator after a delegated run writes its result artifact. In this workflow the message is `AGENT_RUN_COMPLETE <runId> <resultPath>`.
+The small machine-readable message that wakes the issue orchestrator after a delegated run writes its result artifact. In this workflow the first line is `AGENT_RUN_COMPLETE <runId> <resultPath>`, and normal implementer/reviewer runs send it through `scripts/agent-run-complete.ts`.
+
+## Completion utility
+
+The workflow-owned script at `skills/herdr-worktree-flow/scripts/agent-run-complete.ts`. It validates the result artifact and Herdr notification target, delivers the completion notification, presses Return in the resolved Codex pane, retries delivery, and records `.agent/runs/<runId>/notification.json`.
 
 ## Post-worktree setup hook
 

@@ -76,7 +76,18 @@ These files are local agent state. Do not commit them unless the repository alre
 
 ## Agent Run Completion Contract
 
-Implementer and review handoffs use a completion contract instead of normal Herdr agent-state polling. Each delegated run writes a JSON result artifact at the recorded `resultPath`, then sends a small `AGENT_RUN_COMPLETE <runId> <resultPath>` notification to the recorded `notifyTarget`.
+Implementer and review handoffs use a completion contract instead of normal Herdr agent-state polling. Each delegated run writes a JSON result artifact at the recorded `resultPath`, then invokes the workflow-owned completion utility:
+
+```bash
+node skills/herdr-worktree-flow/scripts/agent-run-complete.ts \
+  --run-id <runId> \
+  --role <implementer|reviewer> \
+  --phase <phase> \
+  --result <resultPath> \
+  --notify-target <notifyTarget>
+```
+
+The utility validates the artifact and target, sends `AGENT_RUN_COMPLETE <runId> <resultPath>` with human-readable context, presses Return in the resolved Codex agent pane, retries delivery, and writes `.agent/runs/<runId>/notification.json`. Directly typing or sending `AGENT_RUN_COMPLETE` is legacy/manual recovery only, not the normal path.
 
 The issue orchestrator treats the completion notification as a wake-up signal, reads the artifact, and validates the `runId`, `role`, `phase`, `status`, and role-specific evidence before advancing lifecycle state. Missing, malformed, duplicate, stale, or missed notifications are handled through the contract documented in `references/agent-run-completion-adr.md`.
 
@@ -184,7 +195,7 @@ herdr pane move <returned-pane-id> --new-tab --workspace <workspace-id> --label 
 ```
 
 3. Record the implementer `tabId`, `paneId`, `terminalId`, `agentName`, and `roleLabel` in `.agent/herdr-worktree-flow.json`.
-4. Instruct to use `/implement` when available and to follow the agent run completion contract for the delegated run.
+4. Instruct to use `/implement` when available and to follow the agent run completion contract for the delegated run by writing the result artifact and running `scripts/agent-run-complete.ts`.
 5. Scope implementation to the issue. It may update tests, docs, migrations, and supporting code required by the issue, but should avoid unrelated cleanup.
 6. Wait for `AGENT_RUN_COMPLETE` and the result artifact instead of waiting for the implementer to become idle or blocked.
 7. If the run is blocked or failed, the issue orchestrator resolves the blocker when possible or reports it to the main orchestrator after inspecting the artifact.
@@ -199,7 +210,7 @@ herdr pane move <returned-pane-id> --new-tab --workspace <workspace-id> --label 
 ```
 
 Record the review orchestrator `tabId`, `paneId`, `terminalId`, `agentName`, and `roleLabel` in `.agent/herdr-worktree-flow.json`. Before a PR exists, it runs the `/review-pr` lenses internally against the local diff; once a PR exists, it uses `/review-pr` directly. Review passes when there are no Block or Major findings. Minor findings may be fixed at the issue orchestrator's discretion. Nits are non-blocking.
-The review run uses the same completion contract: write the result artifact first, then send `AGENT_RUN_COMPLETE`, and validate the artifact before advancing lifecycle state.
+The review run uses the same completion contract: write the result artifact first, run `scripts/agent-run-complete.ts`, and validate the artifact before advancing lifecycle state.
 
 For Block or Major findings:
 

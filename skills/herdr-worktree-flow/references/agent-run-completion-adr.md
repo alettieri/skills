@@ -16,7 +16,18 @@ The delegated agent must:
 
 1. Complete the work or determine that it is blocked or failed.
 2. Write a JSON result artifact at the recorded `resultPath`.
-3. Send exactly one completion notification to the recorded `notifyTarget`.
+3. Invoke the workflow-owned completion utility for the recorded `notifyTarget`.
+
+```bash
+node skills/herdr-worktree-flow/scripts/agent-run-complete.ts \
+  --run-id <runId> \
+  --role <implementer|reviewer> \
+  --phase <phase> \
+  --result <resultPath> \
+  --notify-target <notifyTarget>
+```
+
+The utility validates that the artifact exists, parses as JSON, matches the supplied run id, role, and phase, uses schema version `1`, and has an accepted status. It resolves the notify target with `herdr agent get`, rejects targets that are not concrete Codex agents, sends the completion notification, presses Return in the resolved pane, retries delivery up to three attempts, and writes `.agent/runs/<runId>/notification.json` after successful delivery. Direct manual `AGENT_RUN_COMPLETE` messages are reserved for legacy/manual recovery.
 
 The completion notification is intentionally small and machine-recognizable:
 
