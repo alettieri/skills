@@ -20,6 +20,18 @@ A single delegated unit of work owned by one role, identified by a run id and ca
 
 The small machine-readable message that wakes the issue orchestrator after a delegated run writes its result artifact. In this workflow the message is `AGENT_RUN_COMPLETE <runId> <resultPath>`.
 
+## Post-worktree setup hook
+
+The committed executable hook at `.agent/herdr-post-worktree-setup` in the newly created issue worktree. The main orchestrator runs it from the worktree root before writing the final issue brief or launching the issue orchestrator.
+
+## Setup log
+
+The local agent-state log at `.agent/post-worktree-setup.log` that records full stdout and stderr from the post-worktree setup hook. The issue brief references this path instead of embedding full logs.
+
+## Setup blocker
+
+A post-worktree setup result that stops handoff before issue orchestrator launch. Setup blockers include a non-executable hook, startup error, non-zero exit, timeout, or tracked/non-ignored worktree changes after setup.
+
 ## Result artifact
 
 The JSON file written by the delegated agent before it sends completion notification. It is the source of truth for the run's status, summary, and evidence.
