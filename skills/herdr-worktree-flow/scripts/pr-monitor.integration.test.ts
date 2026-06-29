@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import type { SpawnSyncReturns } from 'node:child_process';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const monitorEntry = fileURLToPath(new URL('./pr-monitor.ts', import.meta.url));
@@ -113,7 +114,11 @@ function writeExecutable(path: string, contents: string): void {
   chmodSync(path, 0o755);
 }
 
-function runMonitor(args: string[], options: MonitorRunOptions = {}) {
+type MonitorRunResult = SpawnSyncReturns<string> & {
+  error?: Error & { code?: string };
+};
+
+function runMonitor(args: string[], options: MonitorRunOptions = {}): MonitorRunResult {
   return spawnSync(process.execPath, [monitorEntry, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
@@ -124,7 +129,7 @@ function runMonitor(args: string[], options: MonitorRunOptions = {}) {
       PATH: options.fakeBin ? `${options.fakeBin}:${process.env.PATH}` : process.env.PATH,
       ...options.env,
     },
-  });
+  }) as MonitorRunResult;
 }
 
 function readCommands(logFile: string): Array<{ cmd: string; args: string[] }> {

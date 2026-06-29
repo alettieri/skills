@@ -1,10 +1,9 @@
-#!/usr/bin/env node
-
 import { readFileSync } from 'node:fs';
 import { mkdir, writeFile, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import type { SpawnSyncReturns } from 'node:child_process';
 import {
   HelpRequested,
   classifySnapshot,
@@ -20,7 +19,7 @@ import {
 } from './pr-monitor-domain.ts';
 import type { MonitorArgs, MonitorReport } from './pr-monitor-domain.ts';
 
-type CommandResult = ReturnType<typeof spawnSync>;
+type CommandResult = SpawnSyncReturns<string>;
 
 function logStderr(message: string): void {
   process.stderr.write(`${message}\n`);
