@@ -113,10 +113,11 @@ Write one canonical briefing file into the worktree before handoff. The issue or
 ### 2. Create the issue workspace
 
 1. Derive a descriptive branch name from the issue, following repo conventions when discoverable.
-2. Create a Herdr worktree workspace from the base branch.
-3. Start an issue orchestrator agent in the workspace.
-4. Move the returned issue orchestrator pane into a new dedicated orchestrator tab.
-5. Pass the issue orchestrator:
+2. Identify the source Herdr workspace for the repository with `herdr workspace list`.
+3. Create a Herdr worktree workspace from the source workspace and base branch. Prefer `--workspace <source-workspace-id>` so the issue workspace remains associated with the project workspace the user is working from. Use `--cwd <repo>` only when no source workspace is available.
+4. Start an issue orchestrator agent in the issue workspace.
+5. Move the returned issue orchestrator pane into a new dedicated orchestrator tab.
+6. Pass the issue orchestrator:
    - the path to the worktree briefing file, usually `.agent/issue-brief.md` or `.codex/issue-brief.md`
    - issue number/URL
    - base branch
@@ -128,7 +129,8 @@ Write one canonical briefing file into the worktree before handoff. The issue or
 Use Herdr primitives such as:
 
 ```bash
-herdr worktree create --cwd <repo> --branch <branch> --base <base> --label "<issue label>" --focus --json
+herdr workspace list
+herdr worktree create --workspace <source-workspace-id> --branch <branch> --base <base> --label "<issue label>" --focus --json
 
 herdr agent start issue-orchestrator --cwd <worktree-path> --workspace <workspace-id> -- codex -a on-request -m gpt-5.5
 herdr pane move <returned-pane-id> --new-tab --workspace <workspace-id> --label "orchestrator"
