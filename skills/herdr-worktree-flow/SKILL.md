@@ -211,7 +211,7 @@ Never merge the PR. Opening it and monitoring feedback are the end of the agent'
 
 ### 7. Monitor PR feedback
 
-After the PR exists, monitor until the PR is merged or closed.
+After the PR exists, wait to be notified that the PR is merged or closed. Once notified, cleanup the workspace, worktree and branch.
 
 Use the bundled PR monitor script as the authoritative loop:
 
