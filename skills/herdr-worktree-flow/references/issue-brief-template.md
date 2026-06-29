@@ -55,8 +55,10 @@ Launch policy:
 
 Completion contract:
 - Delegated implementer and review runs must write a JSON result artifact before notifying completion.
-- The issue orchestrator uses the artifact plus `AGENT_RUN_COMPLETE <runId> <resultPath>` instead of normal agent-state polling.
+- Delegated implementer and review runs must invoke `node skills/herdr-worktree-flow/scripts/agent-run-complete.ts --run-id <runId> --role <implementer|reviewer> --phase <phase> --result <resultPath> --notify-target <notifyTarget>` after writing the artifact.
+- The issue orchestrator uses the artifact plus the utility-delivered `AGENT_RUN_COMPLETE <runId> <resultPath>` instead of normal agent-state polling.
 - The orchestrator validates `runId`, `role`, `phase`, `status`, and role-specific evidence before advancing lifecycle state.
+- Direct manual `AGENT_RUN_COMPLETE` messages are legacy/manual recovery only.
 
 Current state:
 - Main orchestrator has created the worktree and is handing off.
