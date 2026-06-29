@@ -1,0 +1,85 @@
+# ADR: Agent Run Completion Contract
+
+Status: Accepted
+
+## Context
+
+The Herdr worktree flow uses an issue orchestrator, an implementer agent, and a review orchestrator agent. The previous handoff model depended on the orchestrator observing sub-agent runtime state such as idle or blocked transitions.
+
+That model is brittle because it spreads completion detection across repeated state polling. The workflow already has a good precedent in the PR monitor: a separate signal wakes the orchestrator only when there is actionable state to process. This ADR applies the same idea to delegated implementer and review runs without adding a new background service.
+
+## Decision
+
+Every delegated implementer or review task is represented as an agent run with a run id, role, phase, result artifact path, completion target, and deadline.
+
+The delegated agent must:
+
+1. Complete the work or determine that it is blocked or failed.
+2. Write a JSON result artifact at the recorded `resultPath`.
+3. Send exactly one completion notification to the recorded `notifyTarget`.
+
+The completion notification is intentionally small and machine-recognizable:
+
+```text
+AGENT_RUN_COMPLETE <runId> <resultPath>
+```
+
+The result artifact is the source of truth. The notification only wakes the orchestrator so it can read and validate the artifact.
+
+## Result Artifact
+
+All completion artifacts use the same envelope:
+
+```json
+{
+  "schemaVersion": 1,
+  "runId": "issue-12-implement-001",
+  "role": "implementer",
+  "phase": "implementing",
+  "status": "complete",
+  "summary": "Implemented the issue and updated tests.",
+  "payload": {
+    "changedFiles": ["skills/herdr-worktree-flow/SKILL.md"],
+    "checksRun": ["node --test skills/herdr-worktree-flow/scripts/*.test.ts"],
+    "checksDeferred": [],
+    "blockers": []
+  }
+}
+```
+
+Allowed `status` values are `complete`, `blocked`, and `failed`.
+
+Implementer results should include changed files, a summary, checks run or deferred with reasons, and blockers when present. Reviewer results should include the review verdict, findings grouped by severity, whether Block or Major findings exist, and the review scope.
+
+## Orchestrator Validation
+
+When the issue orchestrator receives a completion notification, it must validate:
+
+1. The result artifact exists and parses as JSON.
+2. `schemaVersion`, `runId`, `role`, and `phase` match the active delegated run.
+3. The current lifecycle state allows that role and phase to complete.
+4. `status` is one of the accepted values.
+5. The role-specific evidence needed for the current run is present.
+
+The orchestrator may inspect the artifact or the worktree once for verification. It should not rely on Herdr agent-state polling as the normal completion mechanism.
+
+## Lifecycle And Recovery
+
+The issue orchestrator advances lifecycle state only after validating a matching completion artifact.
+
+Recovery behavior:
+
+- Missing artifact: reject the notification and ask the same role agent to rewrite the artifact.
+- Malformed artifact: reject the notification and ask for a corrected artifact.
+- Duplicate notification: ignore it if the same `runId` has already been accepted.
+- Stale notification: reject it if a newer run has already started.
+- Missed notification: if the artifact exists but no notification arrived, the orchestrator can process it only after a human or another agent points it at the artifact.
+
+`blocked` and `failed` results do not advance the lifecycle. The orchestrator resolves the blocker if possible or reports it to the main orchestrator or user.
+
+## Consequences
+
+- Completion becomes deterministic and auditable.
+- The orchestrator no longer needs to poll sub-agent runtime state for normal completion detection.
+- Result artifacts create a local record that can be reviewed, retried, or recovered later.
+- The workflow remains compatible with the existing three-agent topology and the current PR monitor behavior.
