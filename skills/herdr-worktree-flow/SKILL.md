@@ -216,7 +216,7 @@ Run it in a dedicated Herdr tab inside the issue workspace. The `--notify-target
 herdr agent list
 ```
 
-Treat its output and state file as the source of truth for the PR lifecycle. The monitor polls until the PR becomes actionable or terminal, writes the latest JSON state file before notifying, sends exactly one Herdr message, and exits.
+Treat its output and state file as the source of truth for the PR lifecycle. For actionable non-terminal states, the monitor writes the latest JSON state file, sends one Herdr message per new fingerprint, records the notified fingerprint, and continues polling. For terminal states, merged or closed, the monitor writes state, sends one final notification if needed, and exits.
 `agent send` is submitted with a return so the target receives it as an actionable prompt.
 
 1. Treat the feedback as new implementation input.
@@ -224,7 +224,7 @@ Treat its output and state file as the source of truth for the PR lifecycle. The
 3. Have the review orchestrator rerun its internal review cycle.
 4. Run required checks.
 5. Commit and push fixes when review passes.
-6. Restart the monitor after each fix cycle so it can notify again on the next actionable or terminal state.
+6. Keep the existing monitor running after each fix cycle; restart it only if the monitor process failed or was intentionally stopped.
 
 Stop when the PR is merged, closed, or the loop is blocked by missing credentials, ambiguous feedback, failing external systems, or a requested human decision.
 

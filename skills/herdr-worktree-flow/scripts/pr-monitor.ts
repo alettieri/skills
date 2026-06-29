@@ -292,7 +292,7 @@ async function main(): Promise<void> {
   }
 
   const baselineFingerprint = loadBaselineFingerprint(args.stateFile);
-  const notifyBaselineFingerprint = loadNotifiedFingerprint(args.stateFile);
+  let notifiedFingerprint = loadNotifiedFingerprint(args.stateFile);
   let lastFingerprint = baselineFingerprint;
   const notifyMode = Boolean(args.notifyTarget);
 
@@ -309,15 +309,24 @@ async function main(): Promise<void> {
 
     if (notifyMode) {
       if (report.actionRequired || report.terminal) {
-        if (report.fingerprint !== notifyBaselineFingerprint) {
+        if (report.fingerprint !== notifiedFingerprint) {
           logDecision(`notify-ready target=${args.notifyTarget}`);
           await writeStateFile(args.stateFile, report);
           const body = formatNotificationBody(report, args.stateFile);
           await sendNotification(args.notifyTarget as string, body);
           await writeStateFile(args.stateFile, report, report.fingerprint);
+          notifiedFingerprint = report.fingerprint;
+
+          if (report.terminal) {
+            logDecision('exit-terminal');
+            process.exit(0);
+          }
+        } else if (report.terminal) {
+          logDecision('duplicate-terminal exit');
           process.exit(0);
+        } else {
+          logDecision('duplicate-actionable continue');
         }
-        logDecision('duplicate-actionable-or-terminal continue');
       }
       logDecision('continue');
     } else {
