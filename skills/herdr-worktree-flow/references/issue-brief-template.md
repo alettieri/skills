@@ -11,6 +11,7 @@ Use this as the canonical handoff document the main orchestrator writes into the
 - Acceptance criteria
 - Constraints and non-goals
 - Launch policy and model selection
+- Completion contract for delegated implementer/reviewer runs
 - Current state and next action
 
 ## Suggested content
@@ -43,6 +44,11 @@ Launch policy:
 - Review orchestrator: `codex -a never -s workspace-write -m gpt-5.5`
 - PR monitor: no model flag because it is a script process
 - Silent fallback is forbidden; treat launch failure as a blocker.
+
+Completion contract:
+- Delegated implementer and review runs must write a JSON result artifact before notifying completion.
+- The issue orchestrator uses the artifact plus `AGENT_RUN_COMPLETE <runId> <resultPath>` instead of normal agent-state polling.
+- The orchestrator validates `runId`, `role`, `phase`, `status`, and role-specific evidence before advancing lifecycle state.
 
 Current state:
 - Main orchestrator has created the worktree and is handing off.
