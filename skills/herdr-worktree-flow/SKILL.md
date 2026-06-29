@@ -103,6 +103,14 @@ Do not pass `--tab` or `--split` when starting issue orchestrator, implementer, 
 
 Handoff completes when the briefing is submitted with Enter and Herdr reports the issue orchestrator as `working`. From that point on, the issue orchestrator owns implementation, review, verification, PR handling, and feedback loops for that issue.
 
+After creating the worktree and before writing the final briefing or launching the issue orchestrator, run the post-worktree setup helper:
+
+```bash
+node skills/herdr-worktree-flow/scripts/post-worktree-setup.ts <worktree-path>
+```
+
+The helper runs the committed `.agent/herdr-post-worktree-setup` hook from the issue worktree root when it exists. Missing hooks are a successful skipped setup. Present hooks must be executable. Hook startup errors, non-zero exits, the fixed 10-minute timeout, and dirty worktrees after setup are blocking. Full hook stdout and stderr are written to `.agent/post-worktree-setup.log`; the briefing records setup status and log path without embedding full logs.
+
 Write one canonical briefing file into the worktree before handoff. The issue orchestrator reads that file for context and may reopen it later if needed.
 
 ## Workflow
@@ -121,14 +129,18 @@ Write one canonical briefing file into the worktree before handoff. The issue or
 1. Derive a descriptive branch name from the issue, following repo conventions when discoverable.
 2. Identify the source Herdr workspace for the repository with `herdr workspace list`.
 3. Create a Herdr worktree workspace from the source workspace and base branch. Prefer `--workspace <source-workspace-id>` so the issue workspace remains associated with the project workspace the user is working from. Use `--cwd <repo>` only when no source workspace is available.
-4. Start an issue orchestrator agent in the issue workspace.
-5. Move the returned issue orchestrator pane into a new dedicated orchestrator tab.
-6. Pass the issue orchestrator:
+4. Run `node skills/herdr-worktree-flow/scripts/post-worktree-setup.ts <worktree-path>` from the source checkout. If setup returns `blocked`, stop before writing the final issue brief or launching the issue orchestrator and report the blocker with `.agent/post-worktree-setup.log`.
+5. Confirm successful setup left the worktree clean using the helper result. The helper checks `git status --porcelain --untracked-files=normal`.
+6. Write the issue brief with setup status, hook path, and log path.
+7. Start an issue orchestrator agent in the issue workspace.
+8. Move the returned issue orchestrator pane into a new dedicated orchestrator tab.
+9. Pass the issue orchestrator:
    - the path to the worktree briefing file, usually `.agent/issue-brief.md` or `.codex/issue-brief.md`
    - issue number/URL
    - base branch
    - worktree path
    - expected branch name
+   - post-worktree setup status and log path
    - any PRD/spec links
    - instruction to keep the local agent state files
 
@@ -137,6 +149,7 @@ Use Herdr primitives such as:
 ```bash
 herdr workspace list
 herdr worktree create --workspace <source-workspace-id> --branch <branch> --base <base> --label "<issue label>" --focus --json
+node skills/herdr-worktree-flow/scripts/post-worktree-setup.ts <worktree-path>
 
 herdr agent start issue-orchestrator --cwd <worktree-path> --workspace <workspace-id> -- codex -a on-request -m gpt-5.5
 herdr pane move <returned-pane-id> --new-tab --workspace <workspace-id> --label "orchestrator"

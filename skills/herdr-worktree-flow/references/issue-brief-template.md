@@ -7,6 +7,7 @@ Use this as the canonical handoff document the main orchestrator writes into the
 - Issue reference
 - Repository and base branch
 - Worktree path and branch name
+- Post-worktree setup status, hook path, and setup log path
 - Goal summary
 - Acceptance criteria
 - Constraints and non-goals
@@ -24,6 +25,13 @@ Repo: <owner/repo>
 Base branch: <base>
 Worktree: <absolute path>
 Branch: <branch name>
+
+Post-worktree setup:
+- Status: <skipped|succeeded|blocked>
+- Hook path: <worktree>/.agent/herdr-post-worktree-setup
+- Log path: <worktree>/.agent/post-worktree-setup.log or <not written>
+- Exit code or timeout: <value when applicable>
+- Failure summary: <short tail summary for blocked setup; omit full logs>
 
 Goal:
 <one short paragraph>
