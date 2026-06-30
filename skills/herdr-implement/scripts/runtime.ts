@@ -115,8 +115,10 @@ export type DaemonOptions = {
 
 type HerdrWorktreeRecord = {
   workspaceId?: string;
+  workspace_id?: string;
   worktreePath?: string;
   path?: string;
+  cwd?: string;
   branch?: string;
   base?: string;
 };
@@ -124,6 +126,14 @@ type HerdrWorktreeRecord = {
 type WorktreeListOutput = {
   worktrees?: unknown[];
   items?: unknown[];
+};
+
+type SafeParseResult<T> =
+  | { success: true; data: T }
+  | { success: false; issues: string[] };
+
+type HerdrPaneReference = {
+  id: string | null;
 };
 
 function nowIso(now?: () => Date): string {
@@ -243,23 +253,132 @@ function runHerdrJson(runner: HerdrCommandRunner, args: string[]): unknown {
     return null;
   }
 
-  return JSON.parse(stdout) as unknown;
+  try {
+    return JSON.parse(stdout) as unknown;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`herdr ${args.join(' ')} returned invalid JSON: ${message}`);
+  }
 }
 
-function normalizeWorktreeList(value: unknown): HerdrWorktreeRecord[] {
+function formatValidationError(label: string, issues: string[]): Error {
+  return new Error(`${label} validation failed: ${issues.join('; ')}`);
+}
+
+function safeParseWorktreeRecord(value: unknown, path: string): SafeParseResult<HerdrWorktreeRecord> {
+  if (!isRecord(value)) {
+    return { success: false, issues: [`${path} must be an object`] };
+  }
+
+  const issues: string[] = [];
+  for (const field of ['workspaceId', 'workspace_id', 'worktreePath', 'path', 'cwd', 'branch', 'base'] as const) {
+    if (value[field] !== undefined && typeof value[field] !== 'string') {
+      issues.push(`${path}.${field} must be a string when present`);
+    }
+  }
+
+  if (issues.length > 0) {
+    return { success: false, issues };
+  }
+
+  return { success: true, data: value as HerdrWorktreeRecord };
+}
+
+function safeParseWorktreeRecords(records: unknown[], path: string): SafeParseResult<HerdrWorktreeRecord[]> {
+  const parsed: HerdrWorktreeRecord[] = [];
+  const issues: string[] = [];
+
+  records.forEach((record, index) => {
+    const result = safeParseWorktreeRecord(record, `${path}[${index}]`);
+    if (result.success) {
+      parsed.push(result.data);
+    } else {
+      issues.push(...result.issues);
+    }
+  });
+
+  if (issues.length > 0) {
+    return { success: false, issues };
+  }
+
+  return { success: true, data: parsed };
+}
+
+function safeParseWorktreeList(value: unknown): SafeParseResult<HerdrWorktreeRecord[]> {
   if (Array.isArray(value)) {
-    return value.filter(isRecord).map((entry) => entry as HerdrWorktreeRecord);
+    return safeParseWorktreeRecords(value, 'worktree list');
   }
 
   if (isRecord(value)) {
     const output = value as WorktreeListOutput;
+    if (output.worktrees !== undefined && !Array.isArray(output.worktrees)) {
+      return { success: false, issues: ['worktree list.worktrees must be an array when present'] };
+    }
+    if (output.items !== undefined && !Array.isArray(output.items)) {
+      return { success: false, issues: ['worktree list.items must be an array when present'] };
+    }
+
     const records = output.worktrees ?? output.items;
     if (Array.isArray(records)) {
-      return records.filter(isRecord).map((entry) => entry as HerdrWorktreeRecord);
+      return safeParseWorktreeRecords(records, output.worktrees !== undefined ? 'worktree list.worktrees' : 'worktree list.items');
     }
   }
 
-  return [];
+  return { success: false, issues: ['worktree list output must be an array or an object with worktrees/items'] };
+}
+
+function parseWorktreeListOutput(value: unknown): HerdrWorktreeRecord[] {
+  const parsed = safeParseWorktreeList(value);
+  if (!parsed.success) {
+    throw formatValidationError('herdr worktree list output', parsed.issues);
+  }
+  return parsed.data;
+}
+
+function safeParseWorktreeCreate(value: unknown): SafeParseResult<HerdrWorktreeRecord> {
+  return safeParseWorktreeRecord(value, 'worktree create');
+}
+
+function parseWorktreeCreateOutput(value: unknown): HerdrWorktreeRecord {
+  const parsed = safeParseWorktreeCreate(value);
+  if (!parsed.success) {
+    throw formatValidationError('herdr worktree create output', parsed.issues);
+  }
+  return parsed.data;
+}
+
+function safeParsePaneReference(value: unknown, label: string): SafeParseResult<HerdrPaneReference> {
+  if (typeof value === 'string') {
+    return { success: true, data: { id: optionalString(value) } };
+  }
+
+  if (!isRecord(value)) {
+    return { success: false, issues: [`${label} output must be a string id or object`] };
+  }
+
+  for (const field of ['tabId', 'paneId', 'id'] as const) {
+    if (value[field] !== undefined && typeof value[field] !== 'string') {
+      return { success: false, issues: [`${label}.${field} must be a string when present`] };
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      id: optionalString(value.tabId) ?? optionalString(value.paneId) ?? optionalString(value.id),
+    },
+  };
+}
+
+function parsePaneReference(value: unknown, label: string, required: boolean): HerdrPaneReference {
+  const parsed = safeParsePaneReference(value, label);
+  if (!parsed.success) {
+    throw formatValidationError(`herdr ${label} output`, parsed.issues);
+  }
+  if (required && !parsed.data.id) {
+    throw formatValidationError(`herdr ${label} output`, [`${label} did not include an id`]);
+  }
+  return parsed.data;
 }
 
 function chooseWorktreeRecord(records: HerdrWorktreeRecord[], branchName: string): HerdrWorktreeRecord | null {
@@ -279,7 +398,7 @@ function resolveWorkspaceId(record: HerdrWorktreeRecord | null): string | null {
     return null;
   }
 
-  return record.workspaceId ?? null;
+  return record.workspaceId ?? record.workspace_id ?? null;
 }
 
 function requireWorkspaceId(workspaceId: string | null, branchName: string): string {
@@ -358,7 +477,7 @@ function createWorktreeIfNeeded(
   branchName: string,
   issueLabel: string,
 ): WorktreeInfo {
-  const worktreeList = normalizeWorktreeList(
+  const worktreeList = parseWorktreeListOutput(
     runHerdrJson(runner, ['worktree', 'list', '--cwd', repository.rootPath, '--json']),
   );
   const existing = chooseWorktreeRecord(worktreeList, branchName);
@@ -388,12 +507,12 @@ function createWorktreeIfNeeded(
     '--json',
   ]);
 
-  const createdRecord = isRecord(created) ? created : {};
+  const createdRecord = parseWorktreeCreateOutput(created);
   const workspaceId = optionalString(createdRecord.workspaceId) ?? optionalString(createdRecord.workspace_id);
   const worktreePath =
     optionalString(createdRecord.worktreePath) ?? optionalString(createdRecord.path) ?? optionalString(createdRecord.cwd);
 
-  const resolvedList = normalizeWorktreeList(
+  const resolvedList = parseWorktreeListOutput(
     runHerdrJson(runner, ['worktree', 'list', '--cwd', repository.rootPath, '--json']),
   );
   const resolved = chooseWorktreeRecord(resolvedList, branchName);
@@ -431,8 +550,7 @@ function createDaemonPane(
   }
 
   const tabOutput = parseMaybeJson(tabCreate.stdout);
-  const tabRecord = isRecord(tabOutput) ? tabOutput : {};
-  const tabId = typeof tabOutput === 'string' ? tabOutput : optionalString(tabRecord.tabId) ?? optionalString(tabRecord.id);
+  const tabId = parsePaneReference(tabOutput, 'tab create', false).id;
 
   const paneCurrent = runner.run(['pane', 'current', '--current']);
   if (paneCurrent.error) {
@@ -443,11 +561,9 @@ function createDaemonPane(
   }
 
   const paneOutput = parseMaybeJson(paneCurrent.stdout);
-  const paneRecord = isRecord(paneOutput) ? paneOutput : {};
-  const paneId = typeof paneOutput === 'string' ? paneOutput : optionalString(paneRecord.paneId) ?? optionalString(paneRecord.id);
-
+  const paneId = parsePaneReference(paneOutput, 'pane current', true).id;
   if (!paneId) {
-    throw new Error('herdr pane current did not return a pane id');
+    throw formatValidationError('herdr pane current output', ['pane current did not include an id']);
   }
 
   const paneRun = runner.run(['pane', 'run', paneId, daemonCommand]);

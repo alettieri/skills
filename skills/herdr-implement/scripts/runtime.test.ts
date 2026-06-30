@@ -278,6 +278,33 @@ test('bootstrap recovery reuses existing worktree-local state for the requested 
   assert.equal(result.daemonPaneId, 'pane-1');
 });
 
+test('bootstrap recovery accepts snake-case Herdr workspace ids', async () => {
+  const repo = await makeRepo();
+  const repoRoot = realpathSync(repo);
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeWorktreeFixture(worktreePath);
+  writeWorkflowRunState(join(worktreePath, '.agent/herdr-workflow-run.json'), workflowStateFixture(worktreePath, 16));
+  writeDaemonHandleState(join(worktreePath, '.agent/herdr-implement.json'), handleStateFixture(worktreePath, 16, 'tab-1', 'pane-1'));
+
+  const runner = createRunner([
+    {
+      args: ['worktree', 'list', '--cwd', repoRoot, '--json'],
+      result: {
+        stdout: `${JSON.stringify([
+          { workspace_id: 'w16', worktreePath, branch: 'issue-16-herdr-implement' },
+        ])}\n`,
+        stderr: '',
+        status: 0,
+      },
+    },
+  ]);
+
+  const result = bootstrap({ cwd: repo, issue: '#16', runner });
+
+  assert.equal(result.workspaceId, 'w16');
+  assert.equal(result.daemonPaneId, 'pane-1');
+});
+
 test('bootstrap does not reuse an unrelated Herdr worktree', async () => {
   const repo = await makeRepo();
   const repoRoot = realpathSync(repo);
@@ -357,6 +384,99 @@ test('bootstrap does not reuse an unrelated Herdr worktree', async () => {
 
   assert.equal(result.worktreePath, requestedWorktreePath);
   assert.equal(result.workspaceId, 'w16');
+});
+
+test('bootstrap reports invalid Herdr JSON with command context', async () => {
+  const repo = await makeRepo();
+  const repoRoot = realpathSync(repo);
+
+  const runner = createRunner([
+    {
+      args: ['worktree', 'list', '--cwd', repoRoot, '--json'],
+      result: { stdout: '{not-json}\n', stderr: '', status: 0 },
+    },
+  ]);
+
+  assert.throws(
+    () => bootstrap({ cwd: repo, issue: '#16', runner }),
+    /herdr worktree list --cwd .* --json returned invalid JSON/,
+  );
+});
+
+test('bootstrap rejects malformed Herdr worktree list output', async () => {
+  const repo = await makeRepo();
+  const repoRoot = realpathSync(repo);
+
+  const runner = createRunner([
+    {
+      args: ['worktree', 'list', '--cwd', repoRoot, '--json'],
+      result: { stdout: '{"worktrees":{"branch":"issue-16-herdr-implement"}}\n', stderr: '', status: 0 },
+    },
+  ]);
+
+  assert.throws(
+    () => bootstrap({ cwd: repo, issue: '#16', runner }),
+    /herdr worktree list output validation failed: worktree list.worktrees must be an array when present/,
+  );
+});
+
+test('bootstrap rejects malformed Herdr pane output before recording daemon handles', async () => {
+  const repo = await makeRepo();
+  const repoRoot = realpathSync(repo);
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeWorktreeFixture(worktreePath);
+
+  const runner = createRunner([
+    {
+      args: ['worktree', 'list', '--cwd', repoRoot, '--json'],
+      result: { stdout: '[]\n', stderr: '', status: 0 },
+    },
+    {
+      args: [
+        'worktree',
+        'create',
+        '--cwd',
+        repoRoot,
+        '--branch',
+        'issue-16-herdr-implement',
+        '--base',
+        'main',
+        '--label',
+        'issue-16',
+        '--focus',
+        '--json',
+      ],
+      result: {
+        stdout: `${JSON.stringify({
+          workspaceId: 'w16',
+          worktreePath,
+          branch: 'issue-16-herdr-implement',
+        })}\n`,
+        stderr: '',
+        status: 0,
+      },
+    },
+    {
+      args: ['worktree', 'list', '--cwd', repoRoot, '--json'],
+      result: {
+        stdout: `${JSON.stringify([
+          { workspaceId: 'w16', worktreePath, branch: 'issue-16-herdr-implement' },
+        ])}\n`,
+        stderr: '',
+        status: 0,
+      },
+    },
+    {
+      args: ['tab', 'create', '--workspace', 'w16', '--cwd', worktreePath, '--label', 'herdr-implement-daemon', '--focus'],
+      result: { stdout: '{"tabId":17}\n', stderr: '', status: 0 },
+    },
+  ]);
+
+  assert.throws(
+    () => bootstrap({ cwd: repo, issue: '#16', runner }),
+    /herdr tab create output validation failed: tab create.tabId must be a string when present/,
+  );
+  assert.equal(readDaemonHandleState(join(worktreePath, '.agent/herdr-implement.json'))?.daemonPaneId, null);
 });
 
 test('bootstrap rejects durable state that belongs to a different issue', async () => {
