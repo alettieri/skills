@@ -1,0 +1,190 @@
+name: default-herdr-issue-workflow
+version: 1
+type: herdr.issue
+start: setup
+
+roleDefaults:
+  agent: codex
+  approval: on-request
+  sandbox: workspace-write
+  reuse: true
+
+roles:
+  implementer:
+    model: gpt-5.4-mini
+  simplifier:
+    model: gpt-5.4-mini
+  reviewer:
+    model: gpt-5.5
+  verifier:
+    model: gpt-5.5
+
+phases:
+  setup:
+    type: herdr-worktree
+    on:
+      success: post_worktree_setup
+      blocked: blocked
+      failure: failed
+
+  post_worktree_setup:
+    type: script
+    command: scripts/post-worktree-setup.sh
+    on:
+      success: implement
+      skipped: implement
+      blocked: blocked
+      failure: failed
+      timeout: blocked
+
+  implement:
+    type: agent
+    role: implementer
+    prompt: prompts/implement.md
+    resultSchema: implementer-result-v1
+    on:
+      complete: simplify
+      blocked: blocked
+      failed: failed
+
+  simplify:
+    type: agent
+    role: simplifier
+    prompt: prompts/simplify.md
+    resultSchema: simplifier-result-v1
+    on:
+      complete: review
+      no_changes: review
+      blocked: blocked
+      failed: failed
+
+  review:
+    type: agent
+    role: reviewer
+    prompt: prompts/review.md
+    resultSchema: reviewer-result-v1
+    on:
+      approved: verify
+      needs_fix: fix
+      blocked: blocked
+      failed: failed
+
+  fix:
+    type: agent
+    role: implementer
+    prompt: prompts/fix.md
+    resultSchema: implementer-result-v1
+    on:
+      complete: simplify
+      blocked: blocked
+      failed: failed
+
+  verify:
+    type: agent
+    role: verifier
+    prompt: prompts/verify.md
+    resultSchema: verifier-result-v1
+    on:
+      complete: run_checks
+      needs_fix: fix
+      blocked: blocked
+      failed: failed
+
+  run_checks:
+    type: script
+    command: scripts/run-checks.sh
+    on:
+      success: commit_changes
+      checks_failed: fix
+      blocked: blocked
+      failure: failed
+      timeout: blocked
+
+  commit_changes:
+    type: script
+    command: scripts/commit-changes.sh
+    on:
+      success: push_branch
+      no_changes: blocked
+      failure: failed
+
+  push_branch:
+    type: script
+    command: scripts/push-branch.sh
+    on:
+      success: create_pr
+      failure: failed
+      blocked: blocked
+
+  create_pr:
+    type: script
+    command: scripts/create-pr.sh
+    on:
+      success: await_review
+      existing: await_review
+      failure: failed
+      blocked: blocked
+
+  await_review:
+    type: poll
+    command: scripts/check-pr-review.sh
+    intervalSeconds: 60
+    on:
+      approved: await_merge
+      changes_requested: handle_pr_feedback
+      checks_failed: handle_pr_feedback
+      waiting: await_review
+      closed: pr_closed
+      timeout: blocked
+      failure: failed
+
+  handle_pr_feedback:
+    type: agent
+    role: implementer
+    prompt: prompts/handle-pr-feedback.md
+    resultSchema: implementer-result-v1
+    on:
+      complete: simplify
+      blocked: blocked
+      failed: failed
+
+  await_merge:
+    type: poll
+    command: scripts/check-pr-merged.sh
+    intervalSeconds: 60
+    on:
+      merged: cleanup
+      feedback: handle_pr_feedback
+      checks_failed: handle_pr_feedback
+      waiting: await_merge
+      closed: pr_closed
+      timeout: blocked
+      failure: failed
+
+  cleanup:
+    type: script
+    command: scripts/cleanup-worktree.sh
+    on:
+      success: complete
+      cleanup_failed: cleanup_failed
+      failure: cleanup_failed
+
+  complete:
+    type: terminal
+    status: complete
+
+  pr_closed:
+    type: terminal
+    status: closed
+
+  blocked:
+    type: terminal
+    status: blocked
+
+  failed:
+    type: terminal
+    status: failed
+
+  cleanup_failed:
+    type: terminal
+    status: cleanup_failed

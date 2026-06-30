@@ -1,0 +1,270 @@
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import test from 'node:test';
+import { loadWorkflow, normalizeWorkflow, WorkflowValidationError } from './workflow.ts';
+
+test('loads the default workflow', () => {
+  const source = loadWorkflow();
+
+  assert.equal(source.path.endsWith('skills/herdr-implement/workflows/default.yaml'), true);
+  assert.equal(source.workflow.type, 'herdr.issue');
+  assert.equal(source.workflow.start, 'setup');
+  assert.equal(source.workflow.phases.implement.type, 'agent');
+  assert.equal(source.workflow.phases.simplify.role, 'simplifier');
+  assert.equal(source.workflow.phases.verify.type, 'agent');
+  assert.equal(source.workflow.phases.run_checks.type, 'script');
+  assert.equal(source.workflow.phases.commit_changes.type, 'script');
+  assert.equal(source.workflow.phases.push_branch.type, 'script');
+  assert.equal(source.workflow.phases.create_pr.type, 'script');
+});
+
+test('project workflow fully replaces the default when present', async () => {
+  const cwd = await tempProject();
+  await writeFile(
+    join(cwd, '.agent/herdr-workflow.yaml'),
+    JSON.stringify({
+      name: 'project-workflow',
+      version: 1,
+      type: 'herdr.issue',
+      start: 'only',
+      roleDefaults: { reuse: true, model: 'default-model' },
+      roles: { custom: { model: 'project-model' } },
+      phases: { only: { type: 'terminal', status: 'complete' } },
+    }),
+    'utf8',
+  );
+
+  const source = loadWorkflow(cwd);
+
+  assert.equal(source.path, join(cwd, '.agent/herdr-workflow.yaml'));
+  assert.equal(source.workflow.name, 'project-workflow');
+  assert.deepEqual(Object.keys(source.workflow.phases), ['only']);
+});
+
+test('start is required and must reference an existing phase', () => {
+  assert.throws(
+    () =>
+      normalizeWorkflow({
+        name: 'bad-start',
+        version: 1,
+        type: 'herdr.issue',
+        roles: {},
+        phases: { only: { type: 'terminal' } },
+      }),
+    /start must be a non-empty string/,
+  );
+
+  assert.throws(
+    () =>
+      normalizeWorkflow({
+        name: 'bad-start',
+        version: 1,
+        type: 'herdr.issue',
+        start: 'missing',
+        roles: {},
+        phases: { only: { type: 'terminal' } },
+      }),
+    /start references unknown phase: missing/,
+  );
+});
+
+test('role defaults are inherited into roles', () => {
+  const workflow = normalizeWorkflow({
+    name: 'roles',
+    version: 1,
+    type: 'herdr.issue',
+    start: 'done',
+    roleDefaults: {
+      agent: 'codex',
+      approval: 'on-request',
+      reuse: true,
+      model: 'default-model',
+    },
+    roles: {
+      implementer: { model: 'gpt-5.4-mini' },
+    },
+    phases: {
+      done: { type: 'terminal' },
+    },
+  });
+
+  assert.deepEqual(workflow.roles.implementer, {
+    agent: 'codex',
+    approval: 'on-request',
+    reuse: true,
+    model: 'gpt-5.4-mini',
+  });
+});
+
+test('custom roles are supported by agent phases', () => {
+  const workflow = normalizeWorkflow({
+    name: 'custom',
+    version: 1,
+    type: 'herdr.issue',
+    start: 'custom_phase',
+    roleDefaults: { agent: 'codex', reuse: true },
+    roles: {
+      planner: { model: 'gpt-5.5' },
+    },
+    phases: {
+      custom_phase: {
+        type: 'agent',
+        role: 'planner',
+        on: { complete: 'done' },
+      },
+      done: { type: 'terminal' },
+    },
+  });
+
+  assert.equal(workflow.roles.planner.model, 'gpt-5.5');
+  assert.equal(workflow.phases.custom_phase.role, 'planner');
+});
+
+test('invalid role references are rejected', () => {
+  assert.throws(
+    () =>
+      normalizeWorkflow({
+        name: 'bad-role',
+        version: 1,
+        type: 'herdr.issue',
+        start: 'implement',
+        roles: {},
+        phases: {
+          implement: { type: 'agent', role: 'missing', on: { complete: 'done' } },
+          done: { type: 'terminal' },
+        },
+      }),
+    /phase implement references unknown role: missing/,
+  );
+});
+
+test('invalid transition targets are rejected', () => {
+  assert.throws(
+    () =>
+      normalizeWorkflow({
+        name: 'bad-transition',
+        version: 1,
+        type: 'herdr.issue',
+        start: 'one',
+        roles: {},
+        phases: {
+          one: { type: 'script', on: { success: 'missing' } },
+        },
+      }),
+    /phase one outcome success references unknown phase: missing/,
+  );
+});
+
+test('unsupported workflow types are rejected', () => {
+  assert.throws(
+    () =>
+      normalizeWorkflow({
+        name: 'bad-type',
+        version: 1,
+        type: 'herdr.task',
+        start: 'done',
+        roles: {},
+        phases: { done: { type: 'terminal' } },
+      }),
+    /unsupported workflow type: herdr.task/,
+  );
+});
+
+test('generic transition fields are rejected', () => {
+  assert.throws(
+    () =>
+      normalizeWorkflow({
+        name: 'bad-transition-style',
+        version: 1,
+        type: 'herdr.issue',
+        start: 'one',
+        roles: {},
+        phases: {
+          one: { type: 'script', onSuccess: 'done' },
+          done: { type: 'terminal' },
+        },
+      }),
+    /phase one must use named on transitions/,
+  );
+});
+
+async function tempProject(): Promise<string> {
+  const cwd = await mkdtemp(join(tmpdir(), 'herdr-implement-test-'));
+  await mkdir(join(cwd, '.agent'), { recursive: true });
+  await mkdir(join(cwd, 'skills/herdr-implement/workflows'), { recursive: true });
+  await writeFile(
+    join(cwd, 'skills/herdr-implement/workflows/default.yaml'),
+    JSON.stringify({
+      name: 'default',
+      version: 1,
+      type: 'herdr.issue',
+      start: 'default_phase',
+      roles: {},
+      phases: { default_phase: { type: 'terminal', status: 'complete' } },
+    }),
+    'utf8',
+  );
+  return cwd;
+}
+
+test('validation errors use the workflow validation error type', () => {
+  assert.throws(
+    () => normalizeWorkflow(null),
+    (error: unknown) => error instanceof WorkflowValidationError && /workflow must be an object/.test(error.message),
+  );
+});
+
+test('dry-run requires an issue number or GitHub issue URL', () => {
+  const result = spawnSync(process.execPath, ['skills/herdr-implement/scripts/dry-run.ts', '--issue', 'not-an-issue'], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--issue must be an issue number, #number, or GitHub issue URL/);
+});
+
+test('dry-run prints selected workflow details and transition graph', () => {
+  const result = spawnSync(process.execPath, ['skills/herdr-implement/scripts/dry-run.ts', '--issue', '#15'], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /Workflow: .*skills\/herdr-implement\/workflows\/default\.yaml/);
+  assert.match(result.stdout, /Normalized roles:/);
+  assert.match(result.stdout, /- implementer: .*"reuse":true/);
+  assert.match(result.stdout, /Phases:/);
+  assert.match(result.stdout, /- implement: type=agent role=implementer/);
+  assert.match(result.stdout, /Named outcome transitions:/);
+  assert.match(result.stdout, /- review\.approved -> verify/);
+  assert.match(result.stdout, /Transition graph:/);
+  assert.match(result.stdout, /- run_checks -> .*success:commit_changes/);
+});
+
+test('dry-run rejects malformed project workflow before side effects', async () => {
+  const cwd = await tempProject();
+  await writeFile(
+    join(cwd, '.agent/herdr-workflow.yaml'),
+    JSON.stringify({
+      name: 'bad-project-workflow',
+      version: 1,
+      type: 'herdr.issue',
+      start: 'missing',
+      roles: {},
+      phases: { only: { type: 'terminal' } },
+    }),
+    'utf8',
+  );
+
+  const result = spawnSync(process.execPath, [join(process.cwd(), 'skills/herdr-implement/scripts/dry-run.ts'), '--issue', '15'], {
+    cwd,
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Workflow validation failed: start references unknown phase: missing/);
+});
