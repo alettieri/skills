@@ -11,12 +11,20 @@ roleDefaults:
 
 roles:
   implementer:
+    label: implementer
+    agentNameTemplate: issue-{{ issue.number }}-implementer
     model: gpt-5.4-mini
   simplifier:
+    label: simplifier
+    agentNameTemplate: issue-{{ issue.number }}-simplifier
     model: gpt-5.4-mini
   reviewer:
+    label: reviewer
+    agentNameTemplate: issue-{{ issue.number }}-reviewer
     model: gpt-5.5
   verifier:
+    label: verifier
+    agentNameTemplate: issue-{{ issue.number }}-verifier
     model: gpt-5.5
 
 phases:
@@ -40,7 +48,7 @@ phases:
   implement:
     type: agent
     role: implementer
-    prompt: prompts/implement.md
+    promptTemplate: implement.md
     resultSchema: implementer-result-v1
     on:
       complete: simplify
@@ -50,7 +58,7 @@ phases:
   simplify:
     type: agent
     role: simplifier
-    prompt: prompts/simplify.md
+    promptTemplate: simplify.md
     resultSchema: simplifier-result-v1
     on:
       complete: review
@@ -61,7 +69,7 @@ phases:
   review:
     type: agent
     role: reviewer
-    prompt: prompts/review.md
+    promptTemplate: review.md
     resultSchema: reviewer-result-v1
     on:
       approved: verify
@@ -72,7 +80,7 @@ phases:
   fix:
     type: agent
     role: implementer
-    prompt: prompts/fix.md
+    promptTemplate: fix.md
     resultSchema: implementer-result-v1
     on:
       complete: simplify
@@ -82,7 +90,7 @@ phases:
   verify:
     type: agent
     role: verifier
-    prompt: prompts/verify.md
+    promptTemplate: verify.md
     resultSchema: verifier-result-v1
     on:
       complete: run_checks
@@ -141,7 +149,7 @@ phases:
   handle_pr_feedback:
     type: agent
     role: implementer
-    prompt: prompts/handle-pr-feedback.md
+    promptTemplate: handle-pr-feedback.md
     resultSchema: implementer-result-v1
     on:
       complete: simplify

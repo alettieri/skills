@@ -67,7 +67,10 @@ export function normalizeWorkflow(input: unknown): NormalizedWorkflow {
   const version = requireVersion(workflow.version);
   const type = requireString(workflow.type, 'type');
   const start = requireString(workflow.start, 'start');
-  const roleDefaults = optionalRecord(workflow.roleDefaults, 'roleDefaults');
+  const roleDefaults = {
+    reuse: true,
+    ...optionalRecord(workflow.roleDefaults, 'roleDefaults'),
+  };
   const roleEntries = optionalRecord(workflow.roles, 'roles');
   const phaseEntries = requireRecord(workflow.phases, 'phases');
 
@@ -121,9 +124,15 @@ function normalizePhases(phaseEntries: Record<string, unknown>): Record<string, 
       throw new WorkflowValidationError(`phase ${phaseName} must use named on transitions`);
     }
 
+    const promptTemplate = optionalString(phase.promptTemplate ?? phase.prompt, `phases.${phaseName}.promptTemplate`);
+    if (phase.type === 'agent' && !promptTemplate) {
+      throw new WorkflowValidationError(`phase ${phaseName} must define promptTemplate`);
+    }
+
     phases[phaseName] = {
       ...phase,
       type: requireString(phase.type, `phases.${phaseName}.type`),
+      ...(promptTemplate ? { promptTemplate } : {}),
       on: optionalStringMap(phase.on, `phases.${phaseName}.on`),
     };
   }
@@ -198,6 +207,14 @@ function optionalRecord(value: unknown, field: string): Record<string, unknown> 
   }
 
   return requireRecord(value, field);
+}
+
+function optionalString(value: unknown, field: string): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return requireString(value, field);
 }
 
 function requireRecord(value: unknown, field: string): Record<string, unknown> {

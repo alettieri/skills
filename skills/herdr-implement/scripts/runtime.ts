@@ -41,6 +41,28 @@ export type WorktreeInfo = {
   branchName: string;
 };
 
+export type PendingAgentRunState = {
+  runId: string;
+  phaseId: string;
+  roleId: string;
+  resultPath: string;
+  notifyTarget: string;
+  attemptNumber: number;
+  startedAt: string;
+  status: 'pending';
+};
+
+export type RoleAgentState = {
+  roleId: string;
+  roleLabel: string;
+  agentName: string;
+  tabId: string | null;
+  paneId: string | null;
+  terminalId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type DaemonHandleState = {
   schemaVersion: 1;
   runStatePath: string;
@@ -49,6 +71,7 @@ export type DaemonHandleState = {
   daemonTabId: string | null;
   daemonPaneId: string | null;
   daemonCommand: string | null;
+  roleAgents: Record<string, RoleAgentState>;
   createdAt: string;
   updatedAt: string;
 };
@@ -64,6 +87,7 @@ export type WorkflowRunState = {
   workspaceId: string;
   currentPhase: string;
   context: Record<string, unknown>;
+  pendingAgentRun: PendingAgentRunState | null;
   createdAt: string;
   updatedAt: string;
   daemonHandlePath: string;
@@ -136,6 +160,12 @@ type HerdrPaneReference = {
   id: string | null;
 };
 
+type HerdrPaneInfo = {
+  paneId: string | null;
+  tabId: string | null;
+  terminalId: string | null;
+};
+
 function nowIso(now?: () => Date): string {
   return (now?.() ?? new Date()).toISOString();
 }
@@ -164,6 +194,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function optionalString(value: unknown): string | null {
   if (typeof value === 'string' && value.trim() !== '') {
     return value.trim();
+  }
+  return null;
+}
+
+function requireString(value: unknown, field: string): string {
+  const stringValue = optionalString(value);
+  if (!stringValue) {
+    throw new Error(`${field} must be a non-empty string`);
+  }
+  return stringValue;
+}
+
+function optionalBoolean(value: unknown): boolean | null {
+  if (typeof value === 'boolean') {
+    return value;
   }
   return null;
 }
@@ -441,6 +486,13 @@ function parseMaybeJson(stdout: string): unknown {
   }
 }
 
+function unwrapHerdrResult(value: unknown): unknown {
+  if (isRecord(value) && Object.hasOwn(value, 'result')) {
+    return value.result;
+  }
+  return value;
+}
+
 function loadRunState(path: string): WorkflowRunState | null {
   const value = readJsonFile(path);
   if (!value) {
@@ -449,7 +501,10 @@ function loadRunState(path: string): WorkflowRunState | null {
   if (!isRecord(value) || value.schemaVersion !== 1) {
     throw new Error(`invalid workflow run state at ${path}`);
   }
-  return value as WorkflowRunState;
+  return {
+    ...(value as WorkflowRunState),
+    pendingAgentRun: normalizePendingAgentRun(value.pendingAgentRun),
+  };
 }
 
 function loadHandleState(path: string): DaemonHandleState | null {
@@ -460,7 +515,10 @@ function loadHandleState(path: string): DaemonHandleState | null {
   if (!isRecord(value) || value.schemaVersion !== 1) {
     throw new Error(`invalid daemon handle state at ${path}`);
   }
-  return value as DaemonHandleState;
+  return {
+    ...(value as DaemonHandleState),
+    roleAgents: normalizeRoleAgentMap(value.roleAgents),
+  };
 }
 
 function saveRunState(path: string, state: WorkflowRunState): void {
@@ -469,6 +527,463 @@ function saveRunState(path: string, state: WorkflowRunState): void {
 
 function saveHandleState(path: string, state: DaemonHandleState): void {
   writeJsonFile(path, state);
+}
+
+function normalizePendingAgentRun(value: unknown): PendingAgentRunState | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const runId = optionalString(value.runId);
+  const phaseId = optionalString(value.phaseId);
+  const roleId = optionalString(value.roleId);
+  const resultPath = optionalString(value.resultPath);
+  const notifyTarget = optionalString(value.notifyTarget);
+  const status = value.status === 'pending' ? value.status : null;
+  const attemptNumber = typeof value.attemptNumber === 'number' && Number.isFinite(value.attemptNumber) ? value.attemptNumber : null;
+  const startedAt = optionalString(value.startedAt);
+
+  if (!runId || !phaseId || !roleId || !resultPath || !notifyTarget || !status || attemptNumber === null || !startedAt) {
+    return null;
+  }
+
+  return {
+    runId,
+    phaseId,
+    roleId,
+    resultPath,
+    notifyTarget,
+    attemptNumber,
+    startedAt,
+    status,
+  };
+}
+
+function normalizeRoleAgentMap(value: unknown): Record<string, RoleAgentState> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const result: Record<string, RoleAgentState> = {};
+  for (const [roleId, roleValue] of Object.entries(value)) {
+    if (!isRecord(roleValue)) {
+      continue;
+    }
+
+    const roleLabel = optionalString(roleValue.roleLabel);
+    const agentName = optionalString(roleValue.agentName);
+    const tabId = optionalString(roleValue.tabId);
+    const paneId = optionalString(roleValue.paneId);
+    const terminalId = optionalString(roleValue.terminalId);
+    const createdAt = optionalString(roleValue.createdAt);
+    const updatedAt = optionalString(roleValue.updatedAt);
+
+    if (!roleLabel || !agentName || !createdAt || !updatedAt) {
+      continue;
+    }
+
+    result[roleId] = {
+      roleId,
+      roleLabel,
+      agentName,
+      tabId,
+      paneId,
+      terminalId,
+      createdAt,
+      updatedAt,
+    };
+  }
+
+  return result;
+}
+
+type HerdrAgentLaunchResult = {
+  paneId: string | null;
+  tabId: string | null;
+  terminalId: string | null;
+  agentName: string | null;
+};
+
+function firstString(record: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = optionalString(record[key]);
+    if (value) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function normalizeAgentLaunchResult(value: unknown): HerdrAgentLaunchResult {
+  const payload = unwrapHerdrResult(value);
+  if (typeof value === 'string') {
+    return {
+      paneId: optionalString(value),
+      tabId: null,
+      terminalId: null,
+      agentName: null,
+    };
+  }
+
+  if (!isRecord(payload)) {
+    return {
+      paneId: null,
+      tabId: null,
+      terminalId: null,
+      agentName: null,
+    };
+  }
+
+  const agent = isRecord(payload.agent) ? payload.agent : payload;
+  return {
+    paneId: firstString(agent, ['paneId', 'pane_id', 'id']),
+    tabId: firstString(agent, ['tabId', 'tab_id']),
+    terminalId: firstString(agent, ['terminalId', 'terminal_id']),
+    agentName: firstString(agent, ['agentName', 'agent_name', 'name']),
+  };
+}
+
+function normalizePaneInfo(value: unknown): HerdrPaneInfo {
+  const payload = unwrapHerdrResult(value);
+  if (typeof payload === 'string') {
+    return { paneId: optionalString(payload), tabId: null, terminalId: null };
+  }
+
+  if (!isRecord(payload)) {
+    return { paneId: null, tabId: null, terminalId: null };
+  }
+
+  const moveResult = isRecord(payload.move_result) ? payload.move_result : null;
+  const pane = moveResult && isRecord(moveResult.pane) ? moveResult.pane : payload;
+  const createdTab = moveResult && isRecord(moveResult.created_tab) ? moveResult.created_tab : null;
+
+  return {
+    paneId: firstString(pane, ['paneId', 'pane_id', 'id']),
+    tabId: (createdTab ? firstString(createdTab, ['tabId', 'tab_id', 'id']) : null) ?? firstString(pane, ['tabId', 'tab_id']),
+    terminalId: firstString(pane, ['terminalId', 'terminal_id']),
+  };
+}
+
+function resolvePromptTemplatePath(cwd: string, workflowPath: string, templateName: string): string {
+  const projectPath = join(dirname(resolve(workflowPath)), 'prompts', templateName);
+  if (existsSync(projectPath)) {
+    return projectPath;
+  }
+
+  const skillPath = resolve(cwd, 'skills/herdr-implement/prompts', templateName);
+  if (existsSync(skillPath)) {
+    return skillPath;
+  }
+
+  throw new Error(`prompt template does not exist: ${templateName}`);
+}
+
+function readPromptTemplate(cwd: string, workflowPath: string, templateName: string): string {
+  const templatePath = resolvePromptTemplatePath(cwd, workflowPath, templateName);
+  return readFileSync(templatePath, 'utf8');
+}
+
+function renderTemplate(source: string, values: Record<string, string>): string {
+  return source.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_match, key: string) => values[key] ?? '');
+}
+
+function agentRunPrefix(issue: IssueReference): string {
+  return issue.number === null ? 'issue-bootstrap' : `issue-${issue.number}`;
+}
+
+function buildAgentRunId(issue: IssueReference, roleId: string, attemptNumber: number): string {
+  return `${agentRunPrefix(issue)}-${roleId}-${attemptNumber}`;
+}
+
+function buildNotifyTarget(issue: IssueReference): string {
+  return `${agentRunPrefix(issue)}-orchestrator`;
+}
+
+function buildCompletionUtilityCommand(): string {
+  return 'node skills/herdr-worktree-flow/scripts/agent-run-complete.ts';
+}
+
+function renderAgentName(template: string, state: WorkflowRunState, roleId: string): string {
+  return renderTemplate(template, {
+    'issue.canonical': state.issue.canonical,
+    'issue.input': state.issue.input,
+    'issue.number': String(state.issue.number ?? ''),
+    roleId,
+  });
+}
+
+function completionRoleFor(roleId: string): 'implementer' | 'reviewer' {
+  return roleId === 'reviewer' ? 'reviewer' : 'implementer';
+}
+
+function buildAgentStartArgs(
+  agentName: string,
+  worktreePath: string,
+  workspaceId: string,
+  role: Record<string, unknown>,
+): string[] {
+  const approval = requireString(role.approval, 'roles.approval');
+  const sandbox = requireString(role.sandbox, 'roles.sandbox');
+  const model = requireString(role.model, 'roles.model');
+
+  return [
+    'agent',
+    'start',
+    agentName,
+    '--cwd',
+    worktreePath,
+    '--workspace',
+    workspaceId,
+    '--focus',
+    '--',
+    'codex',
+    '-a',
+    approval,
+    '-m',
+    model,
+    '-s',
+    sandbox,
+  ];
+}
+
+function buildAgentMoveArgs(paneId: string, workspaceId: string, roleLabel: string): string[] {
+  return ['pane', 'move', paneId, '--new-tab', '--workspace', workspaceId, '--label', roleLabel, '--focus'];
+}
+
+function buildAgentSendArgs(agentName: string, prompt: string): string[] {
+  return ['agent', 'send', agentName, prompt];
+}
+
+function buildAgentSendEnterArgs(paneId: string): string[] {
+  return ['pane', 'send-keys', paneId, 'Return'];
+}
+
+function createPendingAgentRun(
+  state: WorkflowRunState,
+  phaseId: string,
+  roleId: string,
+  attemptNumber: number,
+  startedAt: string,
+): PendingAgentRunState {
+  const runId = buildAgentRunId(state.issue, `${phaseId}-${roleId}`, attemptNumber);
+  return {
+    runId,
+    phaseId,
+    roleId,
+    resultPath: join(state.worktreePath, '.agent', 'runs', runId, 'result.json'),
+    notifyTarget: buildNotifyTarget(state.issue),
+    attemptNumber,
+    startedAt,
+    status: 'pending',
+  };
+}
+
+function completePendingAgentRun(run: PendingAgentRunState, startedAt: string): PendingAgentRunState {
+  return {
+    ...run,
+    startedAt,
+    status: 'pending',
+  };
+}
+
+function hasPendingAgentRun(state: WorkflowRunState): boolean {
+  return state.pendingAgentRun !== null;
+}
+
+function loadRoleAgent(handleState: DaemonHandleState, roleId: string): RoleAgentState | null {
+  return handleState.roleAgents[roleId] ?? null;
+}
+
+function saveRoleAgent(handleState: DaemonHandleState, roleAgent: RoleAgentState): DaemonHandleState {
+  return {
+    ...handleState,
+    roleAgents: {
+      ...handleState.roleAgents,
+      [roleAgent.roleId]: roleAgent,
+    },
+  };
+}
+
+function launchRoleAgent(
+  runner: HerdrCommandRunner,
+  cwd: string,
+  state: WorkflowRunState,
+  handleState: DaemonHandleState,
+  phaseId: string,
+  roleId: string,
+  agentName: string,
+): { handleState: DaemonHandleState; roleAgent: RoleAgentState } {
+  const phase = state.workflow.phases[phaseId];
+  if (!phase || phase.type !== 'agent') {
+    throw new Error(`phase ${phaseId} is not an agent phase`);
+  }
+
+  const role = state.workflow.roles[roleId];
+  if (!role) {
+    throw new Error(`phase ${phaseId} references unknown role: ${roleId}`);
+  }
+
+  const now = nowIso();
+  const startResult = normalizeAgentLaunchResult(
+    runHerdrJson(
+      runner,
+      buildAgentStartArgs(agentName, state.worktreePath, state.workspaceId, role),
+    ),
+  );
+  if (!startResult.paneId) {
+    throw new Error(`herdr agent start for ${agentName} did not include a pane id`);
+  }
+  const movedResult = normalizePaneInfo(
+    runHerdrJson(runner, buildAgentMoveArgs(startResult.paneId, state.workspaceId, requireString(role.label, `roles.${roleId}.label`))),
+  );
+
+  const roleAgent: RoleAgentState = {
+    roleId,
+    roleLabel: requireString(role.label, `roles.${roleId}.label`),
+    agentName,
+    tabId: movedResult.tabId ?? startResult.tabId,
+    paneId: movedResult.paneId ?? startResult.paneId,
+    terminalId: movedResult.terminalId ?? startResult.terminalId,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  return {
+    handleState: saveRoleAgent(handleState, roleAgent),
+    roleAgent,
+  };
+}
+
+function renderAgentPhasePrompt(
+  cwd: string,
+  state: WorkflowRunState,
+  phaseId: string,
+  roleId: string,
+  pendingRun: PendingAgentRunState,
+): { prompt: string; pendingRun: PendingAgentRunState } {
+  const phase = state.workflow.phases[phaseId];
+  if (!phase || phase.type !== 'agent') {
+    throw new Error(`phase ${phaseId} is not an agent phase`);
+  }
+
+  const promptTemplate = requireString(phase.promptTemplate, `phases.${phaseId}.promptTemplate`);
+  const templateBody = renderTemplate(readPromptTemplate(cwd, state.workflowPath, promptTemplate), {
+    completionUtility: buildCompletionUtilityCommand(),
+    completionRole: completionRoleFor(roleId),
+    notifyTarget: pendingRun.notifyTarget,
+    optionalCapture: 'optional capture value if needed',
+    phaseId,
+    requiredOutcome: Object.keys(phase.on).join(', ') || 'complete',
+    resultPath: pendingRun.resultPath,
+    roleId,
+    runId: pendingRun.runId,
+  });
+  const completionRole = completionRoleFor(roleId);
+  const prompt = [
+    'Agent run metadata:',
+    `- Run id: ${pendingRun.runId}`,
+    `- Phase id: ${phaseId}`,
+    `- Role id: ${roleId}`,
+    `- Result path: ${pendingRun.resultPath}`,
+    `- Notify target: ${pendingRun.notifyTarget}`,
+    `- Required outcome: ${Object.keys(phase.on).join(', ') || 'complete'}`,
+    '- Optional capture: optional capture value if needed',
+    '',
+    'When complete, write the result artifact and invoke:',
+    '',
+    '```bash',
+    `${buildCompletionUtilityCommand()} --run-id ${pendingRun.runId} --role ${completionRole} --phase ${phaseId} --result ${pendingRun.resultPath} --notify-target ${pendingRun.notifyTarget}`,
+    '```',
+    '',
+    templateBody,
+  ].join('\n');
+
+  return {
+    prompt,
+    pendingRun,
+  };
+}
+
+function dispatchAgentPhase(
+  runner: HerdrCommandRunner,
+  cwd: string,
+  statePath: string,
+  handleStatePath: string,
+  state: WorkflowRunState,
+  handleState: DaemonHandleState,
+  phaseId: string,
+  now: () => Date,
+): { state: WorkflowRunState; handleState: DaemonHandleState; result: DaemonStepResult } {
+  const phase = state.workflow.phases[phaseId];
+  if (!phase || phase.type !== 'agent') {
+    throw new Error(`phase ${phaseId} is not an agent phase`);
+  }
+
+  const roleId = requireString(phase.role, `phases.${phaseId}.role`);
+  const role = state.workflow.roles[roleId];
+  if (!role) {
+    throw new Error(`phase ${phaseId} references unknown role: ${roleId}`);
+  }
+
+  const reuseRole = optionalBoolean(role.reuse) ?? true;
+  const attemptNumber = 1;
+  const startedAt = nowIso(now);
+  const pendingRun = createPendingAgentRun(state, phaseId, roleId, attemptNumber, startedAt);
+  const baseAgentName = renderAgentName(requireString(role.agentNameTemplate, `roles.${roleId}.agentNameTemplate`), state, roleId);
+  const agentName = reuseRole ? baseAgentName : `${baseAgentName}-${pendingRun.runId}`;
+  const reusedRole = reuseRole ? loadRoleAgent(handleState, roleId) : null;
+  let nextHandleState = handleState;
+  let roleAgent = reusedRole;
+  if (!roleAgent) {
+    const launched = launchRoleAgent(runner, cwd, state, nextHandleState, phaseId, roleId, agentName);
+    nextHandleState = launched.handleState;
+    roleAgent = launched.roleAgent;
+  }
+
+  if (!roleAgent?.agentName || !roleAgent.paneId) {
+    throw new Error(`role ${roleId} is missing Herdr agent handles`);
+  }
+
+  const prompt = renderAgentPhasePrompt(cwd, state, phaseId, roleId, pendingRun).prompt;
+
+  const sendResult = runner.run(buildAgentSendArgs(roleAgent.agentName, prompt));
+  if (sendResult.error) {
+    throw sendResult.error;
+  }
+  if (sendResult.status !== 0) {
+    throw new Error(`herdr agent send failed with exit ${sendResult.status}: ${sendResult.stderr.trim()}`);
+  }
+
+  const enterResult = runner.run(buildAgentSendEnterArgs(roleAgent.paneId));
+  if (enterResult.error) {
+    throw enterResult.error;
+  }
+  if (enterResult.status !== 0) {
+    throw new Error(`herdr pane send-keys failed with exit ${enterResult.status}: ${enterResult.stderr.trim()}`);
+  }
+
+  const updatedRunState: WorkflowRunState = {
+    ...state,
+    updatedAt: startedAt,
+    pendingAgentRun: completePendingAgentRun(pendingRun, startedAt),
+  };
+  const updatedRoleAgent: RoleAgentState = {
+    ...roleAgent,
+    updatedAt: startedAt,
+  };
+  nextHandleState = reuseRole ? saveRoleAgent(nextHandleState, updatedRoleAgent) : nextHandleState;
+  saveRunState(statePath, updatedRunState);
+  saveHandleState(handleStatePath, nextHandleState);
+
+  return {
+    state: updatedRunState,
+    handleState: nextHandleState,
+    result: {
+      status: 'sleep',
+      currentPhase: phaseId,
+      reason: `waiting for agent run ${pendingRun.runId}`,
+    },
+  };
 }
 
 function createWorktreeIfNeeded(
@@ -647,6 +1162,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
       daemonTabId: null,
       daemonPaneId: null,
       daemonCommand,
+      roleAgents: {},
       createdAt: existingRunState.createdAt,
       updatedAt: existingRunState.updatedAt,
     };
@@ -716,6 +1232,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
         worktreePath: worktree.worktreePath,
       },
     },
+    pendingAgentRun: null,
     createdAt,
     updatedAt: createdAt,
     daemonHandlePath: handleStatePath,
@@ -737,6 +1254,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     daemonTabId: null,
     daemonPaneId: null,
     daemonCommand,
+    roleAgents: {},
     createdAt,
     updatedAt: createdAt,
   };
@@ -810,6 +1328,24 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
   const statePath = options.statePath ? resolve(cwd, options.statePath) : join(cwd, RUN_STATE_PATH);
   const handleStatePath = options.handleStatePath ? resolve(cwd, options.handleStatePath) : join(cwd, HANDLE_STATE_PATH);
   const now = options.now ?? (() => new Date());
+  const runner = options.runner ?? {
+    run(args: string[]): HerdrCommandResult {
+      const result = spawnSync('herdr', args, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      if (result.error) {
+        throw result.error;
+      }
+
+      return {
+        stdout: result.stdout ?? '',
+        stderr: result.stderr ?? '',
+        status: result.status,
+      };
+    },
+  };
   const state = loadRunState(statePath);
   const handleState = loadHandleState(handleStatePath);
 
@@ -842,16 +1378,37 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
     };
   }
 
+  const currentPhase = advanced.currentPhase;
+  if (hasPendingAgentRun(advanced)) {
+    const refreshed = {
+      ...advanced,
+      updatedAt: nowIso(now),
+    };
+    saveRunState(statePath, refreshed);
+
+    return {
+      status: 'sleep',
+      currentPhase,
+      reason: `waiting on pending agent run ${advanced.pendingAgentRun?.runId ?? 'unknown'}`,
+    };
+  }
+
+  const phase = advanced.workflow.phases[currentPhase];
+  if (phase?.type === 'agent') {
+    const dispatched = dispatchAgentPhase(runner, cwd, statePath, handleStatePath, advanced, handleState, currentPhase, now);
+    return dispatched.result;
+  }
+
   const refreshed = {
-    ...state,
+    ...advanced,
     updatedAt: nowIso(now),
   };
   saveRunState(statePath, refreshed);
 
   return {
     status: 'sleep',
-    currentPhase: state.currentPhase,
-    reason: `waiting on ${state.currentPhase}`,
+    currentPhase,
+    reason: `waiting on ${currentPhase}`,
   };
 }
 

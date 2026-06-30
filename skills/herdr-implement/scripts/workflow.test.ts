@@ -12,7 +12,9 @@ test('loads the default workflow', () => {
   assert.equal(source.path.endsWith('skills/herdr-implement/workflows/default.yaml'), true);
   assert.equal(source.workflow.type, 'herdr.issue');
   assert.equal(source.workflow.start, 'setup');
+  assert.equal(source.workflow.roleDefaults.reuse, true);
   assert.equal(source.workflow.phases.implement.type, 'agent');
+  assert.equal(source.workflow.phases.implement.promptTemplate, 'implement.md');
   assert.equal(source.workflow.phases.simplify.role, 'simplifier');
   assert.equal(source.workflow.phases.verify.type, 'agent');
   assert.equal(source.workflow.phases.run_checks.type, 'script');
@@ -113,6 +115,7 @@ test('custom roles are supported by agent phases', () => {
       custom_phase: {
         type: 'agent',
         role: 'planner',
+        promptTemplate: 'planner.md',
         on: { complete: 'done' },
       },
       done: { type: 'terminal' },
@@ -133,7 +136,7 @@ test('invalid role references are rejected', () => {
         start: 'implement',
         roles: {},
         phases: {
-          implement: { type: 'agent', role: 'missing', on: { complete: 'done' } },
+          implement: { type: 'agent', role: 'missing', promptTemplate: 'implement.md', on: { complete: 'done' } },
           done: { type: 'terminal' },
         },
       }),
