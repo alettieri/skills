@@ -1,22 +1,30 @@
+import { parseArgs } from 'node:util';
 import { loadWorkflow, WorkflowValidationError } from './workflow.ts';
 
 function parseIssue(argv: string[]): string {
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === '--issue') {
-      const value = argv[index + 1];
-      if (!value || value.trim() === '') {
-        throw new Error('--issue requires a value');
-      }
-      return normalizeIssueReference(value);
-    }
-    if (arg === '-h' || arg === '--help') {
-      printHelp();
-      process.exit(0);
-    }
+  const parsed = parseArgs({
+    args: argv,
+    options: {
+      issue: {
+        type: 'string',
+      },
+      help: {
+        type: 'boolean',
+        short: 'h',
+      },
+    },
+  });
+
+  if (parsed.values.help) {
+    printHelp();
+    process.exit(0);
   }
 
-  throw new Error('missing required option --issue');
+  if (!parsed.values.issue || parsed.values.issue.trim() === '') {
+    throw new Error('missing required option --issue');
+  }
+
+  return normalizeIssueReference(parsed.values.issue);
 }
 
 function normalizeIssueReference(value: string): string {
