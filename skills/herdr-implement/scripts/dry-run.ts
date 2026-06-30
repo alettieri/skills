@@ -3,7 +3,7 @@ import { loadWorkflow, WorkflowValidationError } from './workflow.ts';
 
 function parseIssue(argv: string[]): string {
   const parsed = parseArgs({
-    args: argv,
+    args: argv.slice(2),
     options: {
       issue: {
         type: 'string',
@@ -40,40 +40,48 @@ function normalizeIssueReference(value: string): string {
 }
 
 function printHelp(): void {
-  process.stdout.write('Usage: dry-run.ts --issue <issue-number-or-url>\n');
+  writeLine('Usage: dry-run.ts --issue <issue-number-or-url>');
+}
+
+function writeLine(line = ''): void {
+  console.log(line);
 }
 
 function main(): void {
-  const issue = parseIssue(process.argv.slice(2));
+  const issue = parseIssue(process.argv);
   const source = loadWorkflow(process.cwd());
 
-  process.stdout.write(`Issue: ${issue}\n`);
-  process.stdout.write(`Workflow: ${source.path}\n`);
-  process.stdout.write(`Name: ${source.workflow.name}\n`);
-  process.stdout.write(`Version: ${source.workflow.version}\n`);
-  process.stdout.write(`Type: ${source.workflow.type}\n`);
-  process.stdout.write(`Start: ${source.workflow.start}\n\n`);
+  writeLine(`Issue: ${issue}`);
+  writeLine(`Workflow: ${source.path}`);
+  writeLine(`Name: ${source.workflow.name}`);
+  writeLine(`Version: ${source.workflow.version}`);
+  writeLine(`Type: ${source.workflow.type}`);
+  writeLine(`Start: ${source.workflow.start}`);
+  writeLine();
 
-  process.stdout.write('Normalized roles:\n');
+  writeLine('Normalized roles:');
   for (const [roleName, role] of Object.entries(source.workflow.roles)) {
-    process.stdout.write(`- ${roleName}: ${JSON.stringify(role)}\n`);
+    writeLine(`- ${roleName}: ${JSON.stringify(role)}`);
   }
 
-  process.stdout.write('\nPhases:\n');
+  writeLine();
+  writeLine('Phases:');
   for (const [phaseName, phase] of Object.entries(source.workflow.phases)) {
     const role = typeof phase.role === 'string' ? ` role=${phase.role}` : '';
-    process.stdout.write(`- ${phaseName}: type=${phase.type}${role}\n`);
+    writeLine(`- ${phaseName}: type=${phase.type}${role}`);
   }
 
-  process.stdout.write('\nNamed outcome transitions:\n');
+  writeLine();
+  writeLine('Named outcome transitions:');
   for (const transition of source.workflow.transitions) {
-    process.stdout.write(`- ${transition.from}.${transition.outcome} -> ${transition.to}\n`);
+    writeLine(`- ${transition.from}.${transition.outcome} -> ${transition.to}`);
   }
 
-  process.stdout.write('\nTransition graph:\n');
+  writeLine();
+  writeLine('Transition graph:');
   for (const [phaseName, phase] of Object.entries(source.workflow.phases)) {
     const targets = Object.entries(phase.on).map(([outcome, target]) => `${outcome}:${target}`);
-    process.stdout.write(`- ${phaseName} -> ${targets.length > 0 ? targets.join(', ') : '(terminal)'}\n`);
+    writeLine(`- ${phaseName} -> ${targets.length > 0 ? targets.join(', ') : '(terminal)'}`);
   }
 }
 
