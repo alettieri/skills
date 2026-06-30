@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { parse as parseYamlDocument } from 'yaml';
 
 export type WorkflowSource = {
   path: string;
@@ -26,13 +27,6 @@ export type WorkflowTransition = {
   from: string;
   outcome: string;
   to: string;
-};
-
-type WorkflowCandidate = Record<string, unknown>;
-
-type Line = {
-  indent: number;
-  text: string;
 };
 
 const DEFAULT_WORKFLOW_PATH = 'skills/herdr-implement/workflows/default.yaml';
@@ -220,182 +214,10 @@ export function parseYaml(source: string): unknown {
     throw new WorkflowValidationError('workflow file is empty');
   }
 
-  if (trimmed.startsWith('{')) {
-    return JSON.parse(trimmed) as unknown;
+  try {
+    return parseYamlDocument(source) as unknown;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new WorkflowValidationError(`workflow file is not valid YAML: ${message}`);
   }
-
-  const lines = source
-    .split(/\r?\n/)
-    .map(stripComment)
-    .filter((line) => line.text.trim() !== '');
-
-  const [value, nextIndex] = parseBlock(lines, 0, lines[0]?.indent ?? 0);
-  if (nextIndex !== lines.length) {
-    throw new WorkflowValidationError(`could not parse workflow near line ${nextIndex + 1}`);
-  }
-
-  return value;
-}
-
-function parseBlock(lines: Line[], index: number, indent: number): [unknown, number] {
-  if (index >= lines.length) {
-    return [{}, index];
-  }
-
-  if (lines[index].indent < indent) {
-    return [{}, index];
-  }
-
-  if (lines[index].text.startsWith('- ')) {
-    return parseArray(lines, index, indent);
-  }
-
-  return parseObject(lines, index, indent);
-}
-
-function parseObject(lines: Line[], index: number, indent: number): [Record<string, unknown>, number] {
-  const result: Record<string, unknown> = {};
-  let cursor = index;
-
-  while (cursor < lines.length) {
-    const line = lines[cursor];
-    if (line.indent < indent) {
-      break;
-    }
-    if (line.indent > indent) {
-      throw new WorkflowValidationError(`unexpected indentation near line ${cursor + 1}`);
-    }
-    if (line.text.startsWith('- ')) {
-      break;
-    }
-
-    const parsed = parseKeyValue(line.text, cursor);
-    if (parsed.value === undefined) {
-      const [child, nextCursor] = parseBlock(lines, cursor + 1, indent + 2);
-      result[parsed.key] = child;
-      cursor = nextCursor;
-    } else {
-      result[parsed.key] = parseScalar(parsed.value);
-      cursor += 1;
-    }
-  }
-
-  return [result, cursor];
-}
-
-function parseArray(lines: Line[], index: number, indent: number): [unknown[], number] {
-  const result: unknown[] = [];
-  let cursor = index;
-
-  while (cursor < lines.length) {
-    const line = lines[cursor];
-    if (line.indent < indent) {
-      break;
-    }
-    if (line.indent !== indent || !line.text.startsWith('- ')) {
-      break;
-    }
-
-    const itemText = line.text.slice(2).trim();
-    if (itemText === '') {
-      const [child, nextCursor] = parseBlock(lines, cursor + 1, indent + 2);
-      result.push(child);
-      cursor = nextCursor;
-      continue;
-    }
-
-    if (itemText.includes(':')) {
-      const parsed = parseKeyValue(itemText, cursor);
-      const item: Record<string, unknown> = {};
-      if (parsed.value === undefined) {
-        const [child, nextCursor] = parseBlock(lines, cursor + 1, indent + 2);
-        item[parsed.key] = child;
-        cursor = nextCursor;
-      } else {
-        item[parsed.key] = parseScalar(parsed.value);
-        cursor += 1;
-      }
-
-      while (cursor < lines.length && lines[cursor].indent === indent + 2 && !lines[cursor].text.startsWith('- ')) {
-        const child = parseKeyValue(lines[cursor].text, cursor);
-        if (child.value === undefined) {
-          const [nested, nextCursor] = parseBlock(lines, cursor + 1, indent + 4);
-          item[child.key] = nested;
-          cursor = nextCursor;
-        } else {
-          item[child.key] = parseScalar(child.value);
-          cursor += 1;
-        }
-      }
-
-      result.push(item);
-      continue;
-    }
-
-    result.push(parseScalar(itemText));
-    cursor += 1;
-  }
-
-  return [result, cursor];
-}
-
-function parseKeyValue(text: string, lineIndex: number): { key: string; value: string | undefined } {
-  const separator = text.indexOf(':');
-  if (separator === -1) {
-    throw new WorkflowValidationError(`expected key/value pair near line ${lineIndex + 1}`);
-  }
-
-  const key = text.slice(0, separator).trim();
-  const rawValue = text.slice(separator + 1).trim();
-  if (key === '') {
-    throw new WorkflowValidationError(`empty key near line ${lineIndex + 1}`);
-  }
-
-  return {
-    key,
-    value: rawValue === '' ? undefined : rawValue,
-  };
-}
-
-function parseScalar(value: string): unknown {
-  if (value === 'true') {
-    return true;
-  }
-  if (value === 'false') {
-    return false;
-  }
-  if (value === 'null') {
-    return null;
-  }
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-    return value.slice(1, -1);
-  }
-  if (/^-?\d+(\.\d+)?$/.test(value)) {
-    return Number(value);
-  }
-
-  return value;
-}
-
-function stripComment(raw: string): Line {
-  let quote: string | null = null;
-  let cut = raw.length;
-
-  for (let index = 0; index < raw.length; index += 1) {
-    const character = raw[index];
-    if ((character === '"' || character === "'") && raw[index - 1] !== '\\') {
-      quote = quote === character ? null : quote ?? character;
-    }
-    if (character === '#' && quote === null && (index === 0 || /\s/.test(raw[index - 1]))) {
-      cut = index;
-      break;
-    }
-  }
-
-  const withoutComment = raw.slice(0, cut).replace(/\s+$/, '');
-  const content = withoutComment.trimStart();
-  return {
-    indent: withoutComment.length - content.length,
-    text: content,
-  };
 }
