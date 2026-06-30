@@ -129,7 +129,7 @@ Write one canonical briefing file into the worktree before handoff. The issue or
 ### 1. Preflight in the source checkout
 
 1. Confirm the user supplied an existing issue reference.
-2. Inspect `herdr -h` plus relevant subcommand help if the CLI surface may differ from prior runs.
+2. Use the `/herdr` skill to help you understand how to use the `herdr` command.
 3. Verify the current directory is the intended repository and identify the base branch.
 4. Check for a dirty source checkout. Do not mix source-checkout changes into the worktree.
 5. Read the issue and any linked PRD/specification. Treat the issue as the implementation contract.
@@ -138,8 +138,7 @@ Write one canonical briefing file into the worktree before handoff. The issue or
 ### 2. Create the issue workspace
 
 1. Derive a descriptive branch name from the issue, following repo conventions when discoverable.
-2. Identify the source Herdr workspace for the repository with `herdr workspace list`.
-3. Create a Herdr worktree workspace from the source workspace and base branch. Prefer `--workspace <source-workspace-id>` so the issue workspace remains associated with the project workspace the user is working from. Use `--cwd <repo>` only when no source workspace is available.
+3. Create a Herdr worktree workspace from the source workspace and base branch. Use `--cwd <repo>` only when no source workspace is available.
 4. Run `node skills/herdr-worktree-flow/scripts/post-worktree-setup.ts <worktree-path>` from the source checkout. If setup returns `blocked`, stop before writing the final issue brief or launching the issue orchestrator and report the blocker with `.agent/post-worktree-setup.log`.
 5. Confirm successful setup left the worktree clean using the helper result. The helper checks `git status --porcelain --untracked-files=normal`.
 6. Write the issue brief with setup status, hook path, and log path.
@@ -159,7 +158,7 @@ Use Herdr primitives such as:
 
 ```bash
 herdr workspace list
-herdr worktree create --workspace <source-workspace-id> --branch <branch> --base <base> --label "<issue label>" --focus --json
+herdr worktree create --branch <branch> --base <base> --label "<issue label>" --json
 node skills/herdr-worktree-flow/scripts/post-worktree-setup.ts <worktree-path>
 
 herdr agent start issue-orchestrator --cwd <worktree-path> --workspace <workspace-id> -- codex -a on-request -m gpt-5.5
@@ -173,8 +172,7 @@ Use tabs, not split panes, for all Codex agents. Start the agent first, then mov
 herdr pane split --direction down ...
 ```
 
-Always prefer current Herdr help over these examples if the CLI has changed.
-If the briefing is staged with `pane send-text`, follow it immediately with `pane send-keys ... Return`; `agent send` alone only writes text.
+If the briefing is staged with `pane send-text`, follow it after a brief delay (500ms) with `pane send-keys ... Return`; `agent send` alone only writes text.
 
 ### 3. Issue orchestrator lifecycle
 
