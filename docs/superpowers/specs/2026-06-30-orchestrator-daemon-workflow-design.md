@@ -120,6 +120,12 @@ The first implementation should avoid becoming a general distributed scheduler. 
 - The daemon runs continuously after skill invocation until it reaches a terminal phase or a workflow-defined cleanup/stop phase.
 - The default workflow should include the full intended issue-to-PR graph from the first schema slice, even before every phase type is executable. Early issues validate and dry-run the full graph, then later issues make phase types executable.
 
+## Implementation Hygiene
+
+- Prefer named object arguments for helpers that carry multiple script-run fields or log metadata.
+- Share script-run shapes and status types between runtime code, recovery, and tests to keep state and expectations aligned.
+- Apply DRY locally to a phase or helper, but avoid broad abstractions that hide workflow-specific behavior.
+
 ## Domain Model
 
 ### Workflow Definition
