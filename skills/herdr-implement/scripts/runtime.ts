@@ -1046,6 +1046,56 @@ function agentTargetForPendingRun(
   return renderAgentName(agentNameTemplate, state, roleId);
 }
 
+function withArtifactRewriteRequest(
+  state: WorkflowRunState,
+  pendingRun: PendingAgentRunState,
+  reason: string,
+  requestedAt: string,
+): WorkflowRunState {
+  return {
+    ...state,
+    updatedAt: requestedAt,
+    context: {
+      ...state.context,
+      lastArtifactRewriteRequest: {
+        runId: pendingRun.runId,
+        phaseId: pendingRun.phaseId,
+        roleId: pendingRun.roleId,
+        reason,
+        requestedAt,
+      },
+    },
+  };
+}
+
+function stopAfterArtifactRewriteDeliveryFailure(
+  statePath: string,
+  state: WorkflowRunState,
+  handleState: DaemonHandleState,
+  pendingRun: PendingAgentRunState,
+  originalReason: string,
+  resultReason: string,
+  now: () => Date,
+): { handleState: DaemonHandleState; state: WorkflowRunState; result: DaemonStepResult } {
+  const refreshed = withArtifactRewriteRequest(
+    state,
+    pendingRun,
+    `${originalReason}; rewrite request could not be delivered`,
+    nowIso(now),
+  );
+  saveRunState(statePath, refreshed);
+
+  return {
+    handleState,
+    state: refreshed,
+    result: {
+      status: 'stop',
+      currentPhase: pendingRun.phaseId,
+      reason: resultReason,
+    },
+  };
+}
+
 function rewritePendingArtifact(
   runner: HerdrCommandRunner,
   statePath: string,
@@ -1083,133 +1133,56 @@ function rewritePendingArtifact(
 
   const sendResult = runner.run(buildAgentSendArgs(agentName, prompt));
   if (sendResult.error) {
-    const updatedAt = nowIso(now);
-    const refreshed = {
-      ...state,
-      updatedAt,
-      context: {
-        ...state.context,
-        lastArtifactRewriteRequest: {
-          runId: pendingRun.runId,
-          phaseId: pendingRun.phaseId,
-          roleId: pendingRun.roleId,
-          reason: `${reason}; rewrite request could not be delivered`,
-          requestedAt: updatedAt,
-        },
-      },
-    };
-    saveRunState(statePath, refreshed);
-    return {
+    return stopAfterArtifactRewriteDeliveryFailure(
+      statePath,
+      state,
       handleState,
-      state: refreshed,
-      result: {
-        status: 'stop',
-        currentPhase: pendingRun.phaseId,
-        reason: `unable to deliver artifact rewrite request for ${pendingRun.runId}: ${sendResult.error.message}`,
-      },
-    };
+      pendingRun,
+      reason,
+      `unable to deliver artifact rewrite request for ${pendingRun.runId}: ${sendResult.error.message}`,
+      now,
+    );
   }
   if (sendResult.status !== 0) {
-    const updatedAt = nowIso(now);
-    const refreshed = {
-      ...state,
-      updatedAt,
-      context: {
-        ...state.context,
-        lastArtifactRewriteRequest: {
-          runId: pendingRun.runId,
-          phaseId: pendingRun.phaseId,
-          roleId: pendingRun.roleId,
-          reason: `${reason}; rewrite request could not be delivered`,
-          requestedAt: updatedAt,
-        },
-      },
-    };
-    saveRunState(statePath, refreshed);
-    return {
+    return stopAfterArtifactRewriteDeliveryFailure(
+      statePath,
+      state,
       handleState,
-      state: refreshed,
-      result: {
-        status: 'stop',
-        currentPhase: pendingRun.phaseId,
-        reason: `unable to deliver artifact rewrite request for ${pendingRun.runId}: ${sendResult.stderr.trim()}`,
-      },
-    };
+      pendingRun,
+      reason,
+      `unable to deliver artifact rewrite request for ${pendingRun.runId}: ${sendResult.stderr.trim()}`,
+      now,
+    );
   }
 
   if (roleAgent?.paneId) {
     const enterResult = runner.run(buildAgentSendEnterArgs(roleAgent.paneId));
     if (enterResult.error) {
-      const updatedAt = nowIso(now);
-      const refreshed = {
-        ...state,
-        updatedAt,
-        context: {
-          ...state.context,
-          lastArtifactRewriteRequest: {
-            runId: pendingRun.runId,
-            phaseId: pendingRun.phaseId,
-            roleId: pendingRun.roleId,
-            reason: `${reason}; rewrite request could not be delivered`,
-            requestedAt: updatedAt,
-          },
-        },
-      };
-      saveRunState(statePath, refreshed);
-      return {
+      return stopAfterArtifactRewriteDeliveryFailure(
+        statePath,
+        state,
         handleState,
-        state: refreshed,
-        result: {
-          status: 'stop',
-          currentPhase: pendingRun.phaseId,
-          reason: `unable to deliver rewrite completion to ${agentName}: ${enterResult.error.message}`,
-        },
-      };
+        pendingRun,
+        reason,
+        `unable to deliver rewrite completion to ${agentName}: ${enterResult.error.message}`,
+        now,
+      );
     }
     if (enterResult.status !== 0) {
-      const updatedAt = nowIso(now);
-      const refreshed = {
-        ...state,
-        updatedAt,
-        context: {
-          ...state.context,
-          lastArtifactRewriteRequest: {
-            runId: pendingRun.runId,
-            phaseId: pendingRun.phaseId,
-            roleId: pendingRun.roleId,
-            reason: `${reason}; rewrite request could not be delivered`,
-            requestedAt: updatedAt,
-          },
-        },
-      };
-      saveRunState(statePath, refreshed);
-      return {
+      return stopAfterArtifactRewriteDeliveryFailure(
+        statePath,
+        state,
         handleState,
-        state: refreshed,
-        result: {
-          status: 'stop',
-          currentPhase: pendingRun.phaseId,
-          reason: `unable to deliver rewrite completion to ${agentName}: ${enterResult.stderr.trim()}`,
-        },
-      };
+        pendingRun,
+        reason,
+        `unable to deliver rewrite completion to ${agentName}: ${enterResult.stderr.trim()}`,
+        now,
+      );
     }
   }
 
   const updatedAt = nowIso(now);
-  const refreshed = {
-    ...state,
-    context: {
-      ...state.context,
-      lastArtifactRewriteRequest: {
-        runId: pendingRun.runId,
-        phaseId: pendingRun.phaseId,
-        roleId: pendingRun.roleId,
-        reason,
-        requestedAt: updatedAt,
-      },
-    },
-    updatedAt,
-  };
+  const refreshed = withArtifactRewriteRequest(state, pendingRun, reason, updatedAt);
   saveRunState(statePath, refreshed);
 
   return {
