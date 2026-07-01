@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { loadWorkflow } from './workflow.ts';
-import type { NormalizedWorkflow } from './workflow.ts';
+import type { NormalizedPhase, NormalizedWorkflow } from './workflow.ts';
 
 export const RUN_STATE_PATH = '.agent/herdr-workflow-run.json';
 export const HANDLE_STATE_PATH = '.agent/herdr-implement.json';
@@ -45,11 +45,30 @@ export type PendingAgentRunState = {
   runId: string;
   phaseId: string;
   roleId: string;
+  completionRole: 'implementer' | 'reviewer';
+  roleLabel: string | null;
+  agentName: string | null;
+  resultSchema: string | null;
   resultPath: string;
   notifyTarget: string;
   attemptNumber: number;
   startedAt: string;
   status: 'pending';
+};
+
+export type AcceptedAgentRunState = {
+  runId: string;
+  phaseId: string;
+  roleId: string;
+  roleLabel: string | null;
+  agentName: string | null;
+  resultSchema: string | null;
+  resultPath: string;
+  acceptedAt: string;
+  status: 'complete' | 'blocked' | 'failed';
+  outcome: string;
+  summary: string | null;
+  capture: Record<string, unknown> | null;
 };
 
 export type RoleAgentState = {
@@ -88,6 +107,7 @@ export type WorkflowRunState = {
   currentPhase: string;
   context: Record<string, unknown>;
   pendingAgentRun: PendingAgentRunState | null;
+  acceptedAgentRuns: Record<string, AcceptedAgentRunState>;
   createdAt: string;
   updatedAt: string;
   daemonHandlePath: string;
@@ -164,6 +184,30 @@ type HerdrPaneInfo = {
   paneId: string | null;
   tabId: string | null;
   terminalId: string | null;
+};
+
+type AgentStatus = 'working' | 'blocked' | 'idle' | 'missing' | 'unknown';
+
+type HerdrAgentInfo = {
+  agentName: string | null;
+  paneId: string | null;
+  tabId: string | null;
+  terminalId: string | null;
+  status: AgentStatus;
+  rawStatus: string | null;
+};
+
+type ResultArtifact = {
+  schemaVersion: number;
+  runId: string;
+  role: string;
+  phase: string;
+  status: 'complete' | 'blocked' | 'failed';
+  outcome: string;
+  capture: Record<string, unknown> | null;
+  summary: string | null;
+  payload: Record<string, unknown> | null;
+  resultSchema: string | null;
 };
 
 function nowIso(now?: () => Date): string {
@@ -501,10 +545,7 @@ function loadRunState(path: string): WorkflowRunState | null {
   if (!isRecord(value) || value.schemaVersion !== 1) {
     throw new Error(`invalid workflow run state at ${path}`);
   }
-  return {
-    ...(value as WorkflowRunState),
-    pendingAgentRun: normalizePendingAgentRun(value.pendingAgentRun),
-  };
+  return normalizeWorkflowRunState(value as Record<string, unknown>);
 }
 
 function loadHandleState(path: string): DaemonHandleState | null {
@@ -537,13 +578,32 @@ function normalizePendingAgentRun(value: unknown): PendingAgentRunState | null {
   const runId = optionalString(value.runId);
   const phaseId = optionalString(value.phaseId);
   const roleId = optionalString(value.roleId);
+  const completionRole =
+    value.completionRole === 'implementer' || value.completionRole === 'reviewer'
+      ? value.completionRole
+      : roleId
+        ? completionRoleFor(roleId)
+        : null;
+  const roleLabel = optionalString(value.roleLabel);
+  const agentName = optionalString(value.agentName);
+  const resultSchema = optionalString(value.resultSchema);
   const resultPath = optionalString(value.resultPath);
   const notifyTarget = optionalString(value.notifyTarget);
   const status = value.status === 'pending' ? value.status : null;
   const attemptNumber = typeof value.attemptNumber === 'number' && Number.isFinite(value.attemptNumber) ? value.attemptNumber : null;
   const startedAt = optionalString(value.startedAt);
 
-  if (!runId || !phaseId || !roleId || !resultPath || !notifyTarget || !status || attemptNumber === null || !startedAt) {
+  if (
+    !runId ||
+    !phaseId ||
+    !roleId ||
+    !completionRole ||
+    !resultPath ||
+    !notifyTarget ||
+    !status ||
+    attemptNumber === null ||
+    !startedAt
+  ) {
     return null;
   }
 
@@ -551,11 +611,80 @@ function normalizePendingAgentRun(value: unknown): PendingAgentRunState | null {
     runId,
     phaseId,
     roleId,
+    completionRole,
+    roleLabel,
+    agentName,
+    resultSchema,
     resultPath,
     notifyTarget,
     attemptNumber,
     startedAt,
     status,
+  };
+}
+
+function normalizeAcceptedAgentRun(value: unknown): AcceptedAgentRunState | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const runId = optionalString(value.runId);
+  const phaseId = optionalString(value.phaseId);
+  const roleId = optionalString(value.roleId);
+  const resultPath = optionalString(value.resultPath);
+  const acceptedAt = optionalString(value.acceptedAt);
+  const status =
+    value.status === 'complete' || value.status === 'blocked' || value.status === 'failed' ? value.status : null;
+  const outcome = optionalString(value.outcome);
+  const summary = optionalString(value.summary);
+  const roleLabel = optionalString(value.roleLabel);
+  const agentName = optionalString(value.agentName);
+  const resultSchema = optionalString(value.resultSchema);
+  const capture = value.capture === undefined ? null : normalizeCapture(value.capture);
+
+  if (!runId || !phaseId || !roleId || !resultPath || !acceptedAt || !status || !outcome) {
+    return null;
+  }
+
+  return {
+    runId,
+    phaseId,
+    roleId,
+    roleLabel,
+    agentName,
+    resultSchema,
+    resultPath,
+    acceptedAt,
+    status,
+    outcome,
+    summary,
+    capture,
+  };
+}
+
+function normalizeAcceptedAgentRunMap(value: unknown): Record<string, AcceptedAgentRunState> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const result: Record<string, AcceptedAgentRunState> = {};
+  for (const [runId, runValue] of Object.entries(value)) {
+    const normalized = normalizeAcceptedAgentRun(runValue);
+    if (normalized) {
+      result[runId] = normalized;
+    }
+  }
+
+  return result;
+}
+
+function normalizeWorkflowRunState(value: Record<string, unknown>): WorkflowRunState {
+  const context = isRecord(value.context) ? { ...value.context } : {};
+  return {
+    ...(value as WorkflowRunState),
+    pendingAgentRun: normalizePendingAgentRun(value.pendingAgentRun),
+    acceptedAgentRuns: normalizeAcceptedAgentRunMap(value.acceptedAgentRuns),
+    context,
   };
 }
 
@@ -758,18 +887,34 @@ function buildAgentSendEnterArgs(paneId: string): string[] {
   return ['pane', 'send-keys', paneId, 'Return'];
 }
 
+function buildAgentGetArgs(agentName: string): string[] {
+  return ['agent', 'get', agentName];
+}
+
+function buildAgentReadArgs(agentName: string): string[] {
+  return ['agent', 'read', agentName];
+}
+
 function createPendingAgentRun(
   state: WorkflowRunState,
+  runId: string,
   phaseId: string,
   roleId: string,
+  completionRole: 'implementer' | 'reviewer',
+  roleLabel: string,
+  agentName: string,
+  resultSchema: string | null,
   attemptNumber: number,
   startedAt: string,
 ): PendingAgentRunState {
-  const runId = buildAgentRunId(state.issue, `${phaseId}-${roleId}`, attemptNumber);
   return {
     runId,
     phaseId,
     roleId,
+    completionRole,
+    roleLabel,
+    agentName,
+    resultSchema,
     resultPath: join(state.worktreePath, '.agent', 'runs', runId, 'result.json'),
     notifyTarget: buildNotifyTarget(state.issue),
     attemptNumber,
@@ -784,6 +929,467 @@ function completePendingAgentRun(run: PendingAgentRunState, startedAt: string): 
     startedAt,
     status: 'pending',
   };
+}
+
+function hasAcceptedRun(state: WorkflowRunState, runId: string): boolean {
+  return Object.hasOwn(state.acceptedAgentRuns, runId);
+}
+
+function parseAgentStatus(value: unknown): HerdrAgentInfo {
+  if (!isRecord(value)) {
+    return {
+      agentName: null,
+      paneId: null,
+      tabId: null,
+      terminalId: null,
+      status: 'missing',
+      rawStatus: null,
+    };
+  }
+
+  const result = isRecord(value.result) ? value.result : value;
+  const agent = isRecord(result.agent) ? result.agent : result;
+  const agentName = firstString(agent, ['agentName', 'agent_name', 'name']);
+  const paneId = firstString(agent, ['paneId', 'pane_id', 'id']);
+  const tabId = firstString(agent, ['tabId', 'tab_id']);
+  const terminalId = firstString(agent, ['terminalId', 'terminal_id']);
+  const rawStatus = firstString(agent, ['agent_status', 'status', 'state', 'mode']);
+  const status = rawStatus === 'working' || rawStatus === 'blocked' || rawStatus === 'idle' ? rawStatus : 'unknown';
+
+  return {
+    agentName,
+    paneId,
+    tabId,
+    terminalId,
+    status: status === 'unknown' && !paneId && !agentName ? 'missing' : status,
+    rawStatus,
+  };
+}
+
+function queryHerdrAgentStatus(runner: HerdrCommandRunner, agentName: string): HerdrAgentInfo {
+  try {
+    const result = runner.run(buildAgentGetArgs(agentName));
+    if (result.error) {
+      throw result.error;
+    }
+    if (result.status !== 0) {
+      return {
+        agentName,
+        paneId: null,
+        tabId: null,
+        terminalId: null,
+        status: 'missing',
+        rawStatus: null,
+      };
+    }
+
+    const parsed = parseMaybeJson(result.stdout);
+    const agentInfo = parseAgentStatus(parsed);
+    return {
+      ...agentInfo,
+      agentName: agentInfo.agentName ?? agentName,
+    };
+  } catch {
+    return {
+      agentName,
+      paneId: null,
+      tabId: null,
+      terminalId: null,
+      status: 'missing',
+      rawStatus: null,
+    };
+  }
+}
+
+function readHerdrAgentTranscript(runner: HerdrCommandRunner, agentName: string): string {
+  const result = runner.run(buildAgentReadArgs(agentName));
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(`herdr agent read failed with exit ${result.status}: ${result.stderr.trim()}`);
+  }
+
+  return result.stdout.trim();
+}
+
+function agentTargetForPendingRun(
+  state: WorkflowRunState,
+  handleState: DaemonHandleState,
+  pendingRun: PendingAgentRunState,
+): string | null {
+  if (pendingRun.agentName) {
+    return pendingRun.agentName;
+  }
+
+  const roleAgent = loadRoleAgent(handleState, pendingRun.roleId);
+  if (roleAgent?.agentName) {
+    return roleAgent.agentName;
+  }
+
+  const phase = state.workflow.phases[pendingRun.phaseId];
+  if (!phase || phase.type !== 'agent') {
+    return null;
+  }
+
+  const roleId = requireString(phase.role, `phases.${pendingRun.phaseId}.role`);
+  const role = state.workflow.roles[roleId];
+  if (!role) {
+    return null;
+  }
+
+  const agentNameTemplate = optionalString(role.agentNameTemplate);
+  if (!agentNameTemplate) {
+    return null;
+  }
+
+  return renderAgentName(agentNameTemplate, state, roleId);
+}
+
+function rewritePendingArtifact(
+  runner: HerdrCommandRunner,
+  statePath: string,
+  state: WorkflowRunState,
+  handleState: DaemonHandleState,
+  pendingRun: PendingAgentRunState,
+  phase: NormalizedPhase,
+  reason: string,
+  now: () => Date,
+): { handleState: DaemonHandleState; state: WorkflowRunState; result: DaemonStepResult } {
+  const agentName = agentTargetForPendingRun(state, handleState, pendingRun);
+  if (!agentName) {
+    return {
+      handleState,
+      state,
+      result: {
+        status: 'stop',
+        currentPhase: pendingRun.phaseId,
+        reason: `unable to resolve agent target for rewrite: ${reason}`,
+      },
+    };
+  }
+
+  const roleAgent = loadRoleAgent(handleState, pendingRun.roleId);
+  const prompt = [
+    `The result artifact at ${pendingRun.resultPath} is invalid.`,
+    `Reason: ${reason}`,
+    `Run id: ${pendingRun.runId}`,
+    `Phase id: ${pendingRun.phaseId}`,
+    `Role id: ${pendingRun.roleId}`,
+    `Completion role: ${pendingRun.completionRole}`,
+    `Expected outcome must be one of: ${Object.keys(phase.on).join(', ') || 'complete'}`,
+    'Rewrite the JSON result artifact at the recorded path and then rerun the completion utility.',
+  ].join('\n');
+
+  const sendResult = runner.run(buildAgentSendArgs(agentName, prompt));
+  if (sendResult.error) {
+    const updatedAt = nowIso(now);
+    const refreshed = {
+      ...state,
+      updatedAt,
+      context: {
+        ...state.context,
+        lastArtifactRewriteRequest: {
+          runId: pendingRun.runId,
+          phaseId: pendingRun.phaseId,
+          roleId: pendingRun.roleId,
+          reason: `${reason}; rewrite request could not be delivered`,
+          requestedAt: updatedAt,
+        },
+      },
+    };
+    saveRunState(statePath, refreshed);
+    return {
+      handleState,
+      state: refreshed,
+      result: {
+        status: 'stop',
+        currentPhase: pendingRun.phaseId,
+        reason: `unable to deliver artifact rewrite request for ${pendingRun.runId}: ${sendResult.error.message}`,
+      },
+    };
+  }
+  if (sendResult.status !== 0) {
+    const updatedAt = nowIso(now);
+    const refreshed = {
+      ...state,
+      updatedAt,
+      context: {
+        ...state.context,
+        lastArtifactRewriteRequest: {
+          runId: pendingRun.runId,
+          phaseId: pendingRun.phaseId,
+          roleId: pendingRun.roleId,
+          reason: `${reason}; rewrite request could not be delivered`,
+          requestedAt: updatedAt,
+        },
+      },
+    };
+    saveRunState(statePath, refreshed);
+    return {
+      handleState,
+      state: refreshed,
+      result: {
+        status: 'stop',
+        currentPhase: pendingRun.phaseId,
+        reason: `unable to deliver artifact rewrite request for ${pendingRun.runId}: ${sendResult.stderr.trim()}`,
+      },
+    };
+  }
+
+  if (roleAgent?.paneId) {
+    const enterResult = runner.run(buildAgentSendEnterArgs(roleAgent.paneId));
+    if (enterResult.error) {
+      const updatedAt = nowIso(now);
+      const refreshed = {
+        ...state,
+        updatedAt,
+        context: {
+          ...state.context,
+          lastArtifactRewriteRequest: {
+            runId: pendingRun.runId,
+            phaseId: pendingRun.phaseId,
+            roleId: pendingRun.roleId,
+            reason: `${reason}; rewrite request could not be delivered`,
+            requestedAt: updatedAt,
+          },
+        },
+      };
+      saveRunState(statePath, refreshed);
+      return {
+        handleState,
+        state: refreshed,
+        result: {
+          status: 'stop',
+          currentPhase: pendingRun.phaseId,
+          reason: `unable to deliver rewrite completion to ${agentName}: ${enterResult.error.message}`,
+        },
+      };
+    }
+    if (enterResult.status !== 0) {
+      const updatedAt = nowIso(now);
+      const refreshed = {
+        ...state,
+        updatedAt,
+        context: {
+          ...state.context,
+          lastArtifactRewriteRequest: {
+            runId: pendingRun.runId,
+            phaseId: pendingRun.phaseId,
+            roleId: pendingRun.roleId,
+            reason: `${reason}; rewrite request could not be delivered`,
+            requestedAt: updatedAt,
+          },
+        },
+      };
+      saveRunState(statePath, refreshed);
+      return {
+        handleState,
+        state: refreshed,
+        result: {
+          status: 'stop',
+          currentPhase: pendingRun.phaseId,
+          reason: `unable to deliver rewrite completion to ${agentName}: ${enterResult.stderr.trim()}`,
+        },
+      };
+    }
+  }
+
+  const updatedAt = nowIso(now);
+  const refreshed = {
+    ...state,
+    context: {
+      ...state.context,
+      lastArtifactRewriteRequest: {
+        runId: pendingRun.runId,
+        phaseId: pendingRun.phaseId,
+        roleId: pendingRun.roleId,
+        reason,
+        requestedAt: updatedAt,
+      },
+    },
+    updatedAt,
+  };
+  saveRunState(statePath, refreshed);
+
+  return {
+    handleState,
+    state: refreshed,
+    result: {
+      status: 'sleep',
+      currentPhase: pendingRun.phaseId,
+      reason: `requested artifact rewrite for ${pendingRun.runId}`,
+    },
+  };
+}
+
+function normalizeCapture(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const capture: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof key !== 'string') {
+      return null;
+    }
+    capture[key] = entry;
+  }
+  return capture;
+}
+
+function readResultArtifact(resultPath: string): ResultArtifact | null {
+  if (!existsSync(resultPath)) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(resultPath, 'utf8')) as unknown;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`result artifact is not valid JSON: ${message}`);
+  }
+
+  if (!isRecord(parsed)) {
+    throw new Error('result artifact must be a JSON object');
+  }
+
+  const schemaVersion = parsed.schemaVersion;
+  if (schemaVersion !== 1) {
+    throw new Error('result artifact schemaVersion must be 1');
+  }
+
+  const runId = optionalString(parsed.runId);
+  const role = optionalString(parsed.role);
+  const phase = optionalString(parsed.phase);
+  const status =
+    parsed.status === 'complete' || parsed.status === 'blocked' || parsed.status === 'failed' ? parsed.status : null;
+  const outcome = optionalString(parsed.outcome);
+  const summary = optionalString(parsed.summary);
+  const capture = parsed.capture === undefined ? null : normalizeCapture(parsed.capture);
+  const payload = parsed.payload === undefined ? null : normalizeCapture(parsed.payload);
+  const resultSchema = optionalString(parsed.resultSchema);
+
+  if (!runId || !role || !phase || !status || !outcome) {
+    throw new Error('result artifact is missing required completion fields');
+  }
+
+  if (parsed.capture !== undefined && capture === null) {
+    throw new Error('result artifact capture must be an object with string keys');
+  }
+
+  if (parsed.payload !== undefined && payload === null) {
+    throw new Error('result artifact payload must be an object with string keys');
+  }
+
+  return {
+    schemaVersion,
+    runId,
+    role,
+    phase,
+    status,
+    outcome,
+    capture,
+    summary,
+    payload,
+    resultSchema,
+  };
+}
+
+function resultArtifactMatchesSchema(
+  artifact: ResultArtifact,
+  expectedResultSchema: string | null,
+): boolean {
+  if (!expectedResultSchema) {
+    return true;
+  }
+
+  return artifact.resultSchema === expectedResultSchema;
+}
+
+function validateResultArtifact(
+  artifact: ResultArtifact,
+  pendingRun: PendingAgentRunState,
+  phase: NormalizedPhase,
+): void {
+  if (artifact.runId !== pendingRun.runId) {
+    throw new Error(`result artifact runId mismatch: expected ${pendingRun.runId}, found ${artifact.runId}`);
+  }
+  if (artifact.phase !== pendingRun.phaseId) {
+    throw new Error(`result artifact phase mismatch: expected ${pendingRun.phaseId}, found ${artifact.phase}`);
+  }
+  if (artifact.role !== pendingRun.completionRole) {
+    throw new Error(`result artifact role mismatch: expected ${pendingRun.completionRole}, found ${artifact.role}`);
+  }
+  if (!resultArtifactMatchesSchema(artifact, pendingRun.resultSchema ?? optionalString(phase.resultSchema))) {
+    throw new Error(
+      `result artifact schema mismatch: expected ${pendingRun.resultSchema ?? optionalString(phase.resultSchema) ?? 'any'}, found ${artifact.resultSchema ?? 'missing'}`,
+    );
+  }
+  if (!Object.hasOwn(phase.on, artifact.outcome)) {
+    throw new Error(`result artifact outcome ${artifact.outcome} is not declared by phase ${pendingRun.phaseId}`);
+  }
+  if (artifact.capture !== null && !isRecord(artifact.capture)) {
+    throw new Error('result artifact capture must be an object with string keys');
+  }
+}
+
+function mergeCaptureIntoContext(
+  context: Record<string, unknown>,
+  capture: Record<string, unknown> | null,
+): Record<string, unknown> {
+  if (!capture) {
+    return context;
+  }
+
+  return {
+    ...context,
+    ...capture,
+  };
+}
+
+function recordAcceptedAgentRun(
+  state: WorkflowRunState,
+  pendingRun: PendingAgentRunState,
+  artifact: ResultArtifact,
+  acceptedAt: string,
+): WorkflowRunState {
+  const acceptedRun: AcceptedAgentRunState = {
+    runId: pendingRun.runId,
+    phaseId: pendingRun.phaseId,
+    roleId: pendingRun.roleId,
+    roleLabel: pendingRun.roleLabel,
+    agentName: pendingRun.agentName,
+    resultSchema: pendingRun.resultSchema ?? artifact.resultSchema,
+    resultPath: pendingRun.resultPath,
+    acceptedAt,
+    status: artifact.status,
+    outcome: artifact.outcome,
+    summary: artifact.summary,
+    capture: artifact.capture,
+  };
+
+  return {
+    ...state,
+    currentPhase: resolveNextPhase(state.workflow, pendingRun.phaseId, artifact.outcome) ?? state.currentPhase,
+    context: mergeCaptureIntoContext(state.context, artifact.capture),
+    pendingAgentRun: null,
+    acceptedAgentRuns: {
+      ...state.acceptedAgentRuns,
+      [pendingRun.runId]: acceptedRun,
+    },
+    updatedAt: acceptedAt,
+  };
+}
+
+function createAcceptedAgentRunSummary(artifact: ResultArtifact, pendingRun: PendingAgentRunState): string {
+  return [
+    `accepted result artifact for ${pendingRun.runId}`,
+    `outcome=${artifact.outcome}`,
+    `status=${artifact.status}`,
+    artifact.summary ? `summary=${artifact.summary}` : 'summary=(none)',
+  ].join('; ');
 }
 
 function hasPendingAgentRun(state: WorkflowRunState): boolean {
@@ -869,7 +1475,7 @@ function renderAgentPhasePrompt(
   const promptTemplate = requireString(phase.promptTemplate, `phases.${phaseId}.promptTemplate`);
   const templateBody = renderTemplate(readPromptTemplate(cwd, state.workflowPath, promptTemplate), {
     completionUtility: buildCompletionUtilityCommand(),
-    completionRole: completionRoleFor(roleId),
+    completionRole: pendingRun.completionRole,
     notifyTarget: pendingRun.notifyTarget,
     optionalCapture: 'optional capture value if needed',
     phaseId,
@@ -878,12 +1484,12 @@ function renderAgentPhasePrompt(
     roleId,
     runId: pendingRun.runId,
   });
-  const completionRole = completionRoleFor(roleId);
   const prompt = [
     'Agent run metadata:',
     `- Run id: ${pendingRun.runId}`,
     `- Phase id: ${phaseId}`,
     `- Role id: ${roleId}`,
+    `- Completion role: ${pendingRun.completionRole}`,
     `- Result path: ${pendingRun.resultPath}`,
     `- Notify target: ${pendingRun.notifyTarget}`,
     `- Required outcome: ${Object.keys(phase.on).join(', ') || 'complete'}`,
@@ -892,7 +1498,7 @@ function renderAgentPhasePrompt(
     'When complete, write the result artifact and invoke:',
     '',
     '```bash',
-    `${buildCompletionUtilityCommand()} --run-id ${pendingRun.runId} --role ${completionRole} --phase ${phaseId} --result ${pendingRun.resultPath} --notify-target ${pendingRun.notifyTarget}`,
+    `${buildCompletionUtilityCommand()} --run-id ${pendingRun.runId} --role ${pendingRun.completionRole} --phase ${phaseId} --result ${pendingRun.resultPath} --notify-target ${pendingRun.notifyTarget}`,
     '```',
     '',
     templateBody,
@@ -928,9 +1534,21 @@ function dispatchAgentPhase(
   const reuseRole = optionalBoolean(role.reuse) ?? true;
   const attemptNumber = 1;
   const startedAt = nowIso(now);
-  const pendingRun = createPendingAgentRun(state, phaseId, roleId, attemptNumber, startedAt);
   const baseAgentName = renderAgentName(requireString(role.agentNameTemplate, `roles.${roleId}.agentNameTemplate`), state, roleId);
-  const agentName = reuseRole ? baseAgentName : `${baseAgentName}-${pendingRun.runId}`;
+  const runId = buildAgentRunId(state.issue, `${phaseId}-${roleId}`, attemptNumber);
+  const agentName = reuseRole ? baseAgentName : `${baseAgentName}-${runId}`;
+  const pendingRun = createPendingAgentRun(
+    state,
+    runId,
+    phaseId,
+    roleId,
+    completionRoleFor(roleId),
+    requireString(role.label, `roles.${roleId}.label`),
+    agentName,
+    optionalString(phase.resultSchema),
+    attemptNumber,
+    startedAt,
+  );
   const reusedRole = reuseRole ? loadRoleAgent(handleState, roleId) : null;
   let nextHandleState = handleState;
   let roleAgent = reusedRole;
@@ -1233,6 +1851,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
       },
     },
     pendingAgentRun: null,
+    acceptedAgentRuns: {},
     createdAt,
     updatedAt: createdAt,
     daemonHandlePath: handleStatePath,
@@ -1323,6 +1942,308 @@ function advanceInitialPhase(state: WorkflowRunState): WorkflowRunState {
   return state;
 }
 
+function processPendingAgentRun(
+  runner: HerdrCommandRunner,
+  state: WorkflowRunState,
+  handleState: DaemonHandleState,
+  statePath: string,
+  now: () => Date,
+): { state: WorkflowRunState; result: DaemonStepResult } {
+  const pendingRun = state.pendingAgentRun;
+  if (!pendingRun) {
+    return {
+      state,
+      result: {
+        status: 'sleep',
+        currentPhase: state.currentPhase,
+        reason: `waiting on ${state.currentPhase}`,
+      },
+    };
+  }
+
+  const phase = state.workflow.phases[pendingRun.phaseId];
+  if (!phase || phase.type !== 'agent') {
+    throw new Error(`phase ${pendingRun.phaseId} is not an agent phase`);
+  }
+
+  if (hasAcceptedRun(state, pendingRun.runId)) {
+    const updatedAt = nowIso(now);
+    const acceptedRun = state.acceptedAgentRuns[pendingRun.runId];
+    const nextPhase = resolveNextPhase(state.workflow, acceptedRun.phaseId, acceptedRun.outcome);
+    const refreshed = {
+      ...state,
+      currentPhase: nextPhase ?? state.currentPhase,
+      pendingAgentRun: null,
+      updatedAt,
+    };
+    saveRunState(statePath, refreshed);
+    return {
+      state: refreshed,
+      result: {
+        status: 'sleep',
+        currentPhase: pendingRun.phaseId,
+        nextPhase: refreshed.currentPhase,
+        reason: `duplicate completion ignored for ${pendingRun.runId}`,
+      },
+    };
+  }
+
+  let artifact: ResultArtifact | null;
+  try {
+    artifact = readResultArtifact(pendingRun.resultPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return rewritePendingArtifact(runner, statePath, state, handleState, pendingRun, phase, message, now);
+  }
+  if (artifact) {
+    try {
+      validateResultArtifact(artifact, pendingRun, phase);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isStale = /runId mismatch|phase mismatch|role mismatch/.test(message);
+      if (isStale) {
+        const updatedAt = nowIso(now);
+        const refreshed = {
+          ...state,
+          updatedAt,
+          context: {
+            ...state.context,
+            lastRejectedAgentResult: {
+              runId: artifact.runId,
+              expectedRunId: pendingRun.runId,
+              phaseId: pendingRun.phaseId,
+              roleId: pendingRun.roleId,
+              reason: message,
+              rejectedAt: updatedAt,
+            },
+          },
+        };
+        saveRunState(statePath, refreshed);
+        return rewritePendingArtifact(runner, statePath, refreshed, handleState, pendingRun, phase, message, now);
+      }
+
+      return rewritePendingArtifact(runner, statePath, state, handleState, pendingRun, phase, message, now);
+    }
+
+    const acceptedAt = nowIso(now);
+    const updatedState = recordAcceptedAgentRun(state, pendingRun, artifact, acceptedAt);
+    saveRunState(statePath, updatedState);
+    return {
+      state: updatedState,
+      result: {
+        status: 'continue',
+        currentPhase: pendingRun.phaseId,
+        nextPhase: updatedState.currentPhase,
+        reason: createAcceptedAgentRunSummary(artifact, pendingRun),
+      },
+    };
+  }
+
+  const agentName = agentTargetForPendingRun(state, handleState, pendingRun);
+  if (!agentName) {
+    const updatedAt = nowIso(now);
+    const refreshed = {
+      ...state,
+      updatedAt,
+      context: {
+        ...state.context,
+        missingAgentRecovery: {
+          runId: pendingRun.runId,
+          phaseId: pendingRun.phaseId,
+          roleId: pendingRun.roleId,
+          recoveredAt: updatedAt,
+          reason: 'unable to resolve agent target',
+        },
+      },
+    };
+    const blockedPhase = resolveNextPhase(state.workflow, pendingRun.phaseId, 'blocked');
+    if (blockedPhase) {
+      const routed = {
+        ...refreshed,
+        currentPhase: blockedPhase,
+        pendingAgentRun: null,
+      };
+      saveRunState(statePath, routed);
+      return {
+        state: routed,
+        result: {
+          status: 'continue',
+          currentPhase: pendingRun.phaseId,
+          nextPhase: blockedPhase,
+          reason: `missing agent target for ${pendingRun.runId}`,
+        },
+      };
+    }
+
+    saveRunState(statePath, refreshed);
+    return {
+      state: refreshed,
+      result: {
+        status: 'stop',
+        currentPhase: pendingRun.phaseId,
+        reason: `missing agent target for ${pendingRun.runId}`,
+      },
+    };
+  }
+
+  const agentInfo = queryHerdrAgentStatus(runner, agentName);
+  const updatedAt = nowIso(now);
+
+  if (agentInfo.status === 'working') {
+    const refreshed = {
+      ...state,
+      updatedAt,
+    };
+    saveRunState(statePath, refreshed);
+    return {
+      state: refreshed,
+      result: {
+        status: 'sleep',
+        currentPhase: pendingRun.phaseId,
+        reason: `waiting on agent run ${pendingRun.runId}`,
+      },
+    };
+  }
+
+  if (agentInfo.status === 'blocked') {
+    const blockedPhase = resolveNextPhase(state.workflow, pendingRun.phaseId, 'blocked');
+    const refreshed = {
+      ...state,
+      updatedAt,
+      context: {
+        ...state.context,
+        blockedAgentObservation: {
+          runId: pendingRun.runId,
+          phaseId: pendingRun.phaseId,
+          roleId: pendingRun.roleId,
+          agentName,
+          observedAt: updatedAt,
+        },
+      },
+      pendingAgentRun: null,
+      currentPhase: blockedPhase ?? state.currentPhase,
+    };
+    saveRunState(statePath, refreshed);
+    if (blockedPhase) {
+      return {
+        state: refreshed,
+        result: {
+          status: 'continue',
+          currentPhase: pendingRun.phaseId,
+          nextPhase: blockedPhase,
+          reason: `agent ${agentName} reported blocked`,
+        },
+      };
+    }
+
+    return {
+      state: refreshed,
+      result: {
+        status: 'stop',
+        currentPhase: pendingRun.phaseId,
+        reason: `agent ${agentName} reported blocked`,
+      },
+    };
+  }
+
+  if (agentInfo.status === 'missing') {
+    const blockedPhase = resolveNextPhase(state.workflow, pendingRun.phaseId, 'blocked');
+    const refreshed = {
+      ...state,
+      updatedAt,
+      context: {
+        ...state.context,
+        missingAgentRecovery: {
+          runId: pendingRun.runId,
+          phaseId: pendingRun.phaseId,
+          roleId: pendingRun.roleId,
+          agentName,
+          recoveredAt: updatedAt,
+          reason: 'agent target missing after handle recovery',
+        },
+      },
+      pendingAgentRun: blockedPhase ? null : state.pendingAgentRun,
+      currentPhase: blockedPhase ?? state.currentPhase,
+    };
+    saveRunState(statePath, refreshed);
+    return {
+      state: refreshed,
+      result: {
+        status: blockedPhase ? 'continue' : 'stop',
+        currentPhase: pendingRun.phaseId,
+        nextPhase: blockedPhase ?? undefined,
+        reason: `agent target missing for ${pendingRun.runId}`,
+      },
+    };
+  }
+
+  if (agentInfo.status === 'idle' || agentInfo.status === 'unknown') {
+    const existingIdleRecovery = isRecord(state.context.idleAgentRecovery) ? state.context.idleAgentRecovery : null;
+    if (optionalString(existingIdleRecovery?.runId) === pendingRun.runId) {
+      const blockedPhase = resolveNextPhase(state.workflow, pendingRun.phaseId, 'blocked');
+      const refreshed = {
+        ...state,
+        updatedAt,
+        pendingAgentRun: blockedPhase ? null : state.pendingAgentRun,
+        currentPhase: blockedPhase ?? state.currentPhase,
+      };
+      saveRunState(statePath, refreshed);
+      return {
+        state: refreshed,
+        result: {
+          status: blockedPhase ? 'continue' : 'stop',
+          currentPhase: pendingRun.phaseId,
+          nextPhase: blockedPhase ?? undefined,
+          reason: `agent ${agentName} remained ${agentInfo.status} without a valid result artifact`,
+        },
+      };
+    }
+
+    const transcript = readHerdrAgentTranscript(runner, agentName);
+    const refreshed = {
+      ...state,
+      updatedAt,
+      context: {
+        ...state.context,
+        idleAgentRecovery: {
+          runId: pendingRun.runId,
+          phaseId: pendingRun.phaseId,
+          roleId: pendingRun.roleId,
+          agentName,
+          status: agentInfo.status,
+          observedAt: updatedAt,
+          transcript: transcript ?? null,
+        },
+      },
+    };
+    saveRunState(statePath, refreshed);
+    return rewritePendingArtifact(
+      runner,
+      statePath,
+      refreshed,
+      handleState,
+      pendingRun,
+      phase,
+      'agent is idle without a valid result artifact',
+      now,
+    );
+  }
+
+  const refreshed = {
+    ...state,
+    updatedAt,
+  };
+  saveRunState(statePath, refreshed);
+  return {
+    state: refreshed,
+    result: {
+      status: 'sleep',
+      currentPhase: pendingRun.phaseId,
+      reason: `waiting on agent run ${pendingRun.runId}`,
+    },
+  };
+}
+
 export function daemonStep(options: DaemonOptions): DaemonStepResult {
   const cwd = resolve(options.cwd ?? process.cwd());
   const statePath = options.statePath ? resolve(cwd, options.statePath) : join(cwd, RUN_STATE_PATH);
@@ -1378,21 +2299,12 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
     };
   }
 
-  const currentPhase = advanced.currentPhase;
   if (hasPendingAgentRun(advanced)) {
-    const refreshed = {
-      ...advanced,
-      updatedAt: nowIso(now),
-    };
-    saveRunState(statePath, refreshed);
-
-    return {
-      status: 'sleep',
-      currentPhase,
-      reason: `waiting on pending agent run ${advanced.pendingAgentRun?.runId ?? 'unknown'}`,
-    };
+    const processed = processPendingAgentRun(runner, advanced, handleState, statePath, now);
+    return processed.result;
   }
 
+  const currentPhase = advanced.currentPhase;
   const phase = advanced.workflow.phases[currentPhase];
   if (phase?.type === 'agent') {
     const dispatched = dispatchAgentPhase(runner, cwd, statePath, handleStatePath, advanced, handleState, currentPhase, now);
