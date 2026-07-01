@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -171,6 +171,7 @@ function workflowStateFixture(worktreePath: string, issueNumber: number, current
     context: {},
     pendingAgentRun: null,
     acceptedAgentRuns: {},
+    scriptRuns: {},
     createdAt: '2026-06-30T12:00:00.000Z',
     updatedAt: '2026-06-30T12:00:00.000Z',
     daemonHandlePath: join(worktreePath, '.agent/herdr-implement.json'),
@@ -223,6 +224,7 @@ function agentWorkflowStateFixture(worktreePath: string, issueNumber: number, cu
     context: {},
     pendingAgentRun: null,
     acceptedAgentRuns: {},
+    scriptRuns: {},
     createdAt: '2026-06-30T12:00:00.000Z',
     updatedAt: '2026-06-30T12:00:00.000Z',
     daemonHandlePath: join(worktreePath, '.agent/herdr-implement.json'),
@@ -260,6 +262,7 @@ function completionWorkflowStateFixture(worktreePath: string, issueNumber: numbe
     context: {},
     pendingAgentRun: null,
     acceptedAgentRuns: {},
+    scriptRuns: {},
     createdAt: '2026-06-30T12:00:00.000Z',
     updatedAt: '2026-06-30T12:00:00.000Z',
     daemonHandlePath: join(worktreePath, '.agent/herdr-implement.json'),
@@ -270,6 +273,116 @@ function completionWorkflowStateFixture(worktreePath: string, issueNumber: numbe
       startedAt: null,
     },
   };
+}
+
+function scriptWorkflowFixture(options?: {
+  command?: string;
+  on?: Record<string, string>;
+  timeoutSeconds?: number;
+  retryable?: boolean;
+}): Record<string, unknown> {
+  return {
+    name: 'script-workflow',
+    version: 1,
+    type: 'herdr.issue',
+    start: 'run_script',
+    roleDefaults: {},
+    roles: {},
+    phases: {
+      run_script: {
+        type: 'script',
+        command: options?.command ?? 'scripts/run-script.sh',
+        args: ['{{ issue.number }}', '{{ context.greeting }}', '{{ context.outputPath }}'],
+        cwd: '{{ context.customCwd }}',
+        env: {
+          HERDR_TEST_GREETING: '{{ context.greeting }}',
+        },
+        timeoutSeconds: options?.timeoutSeconds,
+        retryable: options?.retryable,
+        on: options?.on ?? { success: 'done', blocked: 'blocked', failure: 'failed', timeout: 'timeout' },
+      },
+      done: {
+        type: 'terminal',
+        status: 'complete',
+      },
+      blocked: {
+        type: 'terminal',
+        status: 'blocked',
+      },
+      failed: {
+        type: 'terminal',
+        status: 'failed',
+      },
+      timeout: {
+        type: 'terminal',
+        status: 'blocked',
+      },
+    },
+  };
+}
+
+function scriptWorkflowStateFixture(
+  worktreePath: string,
+  issueNumber: number,
+  currentPhase = 'run_script',
+  workflowOptions?: Parameters<typeof scriptWorkflowFixture>[0],
+) {
+  const workflowPath = join(worktreePath, '.agent/herdr-workflow.yaml');
+  return {
+    schemaVersion: 1 as const,
+    issue: {
+      input: `#${issueNumber}`,
+      number: issueNumber,
+      url: null,
+      canonical: `#${issueNumber}`,
+    },
+    workflowPath,
+    workflow: normalizeWorkflow(scriptWorkflowFixture(workflowOptions)) as never,
+    sourceRepo: {
+      rootPath: worktreePath,
+      remoteUrl: null,
+      currentBranch: 'main',
+      baseBranch: 'main',
+    },
+    branchName: `issue-${issueNumber}-herdr-implement`,
+    worktreePath,
+    workspaceId: `w${issueNumber}`,
+    currentPhase,
+    context: {
+      greeting: 'hello',
+      customCwd: worktreePath,
+      outputPath: join(worktreePath, '.agent/script-output.txt'),
+    },
+    pendingAgentRun: null,
+    acceptedAgentRuns: {},
+    scriptRuns: {},
+    createdAt: '2026-06-30T12:00:00.000Z',
+    updatedAt: '2026-06-30T12:00:00.000Z',
+    daemonHandlePath: join(worktreePath, '.agent/herdr-implement.json'),
+    daemon: {
+      tabId: null,
+      paneId: null,
+      command: null,
+      startedAt: null,
+    },
+  };
+}
+
+async function makeScriptWorkflowFixture(
+  worktreePath: string,
+  scriptBody: string,
+  workflowOptions?: Parameters<typeof scriptWorkflowFixture>[0],
+): Promise<void> {
+  await mkdir(join(worktreePath, '.agent/scripts'), { recursive: true });
+  await mkdir(join(worktreePath, '.agent'), { recursive: true });
+  await writeFileSync(
+    join(worktreePath, '.agent/herdr-workflow.yaml'),
+    JSON.stringify(scriptWorkflowFixture(workflowOptions), null, 2),
+    'utf8',
+  );
+  const scriptPath = join(worktreePath, '.agent/scripts/run-script.sh');
+  writeFileSync(scriptPath, scriptBody, 'utf8');
+  chmodSync(scriptPath, 0o755);
 }
 
 function normalizeArg(value: string): string {
@@ -1836,4 +1949,297 @@ test('daemon step does not persist a pending run when agent send fails', async (
   );
 
   assert.equal(readWorkflowRunState(runStatePath)?.pendingAgentRun, null);
+});
+
+test('daemon step executes a script phase directly, records logs, and routes by stdout token', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeScriptWorkflowFixture(
+    worktreePath,
+    `#!/bin/sh
+set -eu
+printf '%s' "$PWD" > .agent/script-cwd.txt
+printf '%s' "$HERDR_TEST_GREETING" > .agent/script-greeting.txt
+printf '%s,%s,%s' "$1" "$2" "$3" > .agent/script-args.txt
+printf 'stderr-line\\n' >&2
+printf 'success\\n'
+`,
+  );
+
+  const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+  const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
+  writeWorkflowRunState(runStatePath, scriptWorkflowStateFixture(worktreePath, 19));
+  writeDaemonHandleState(handleStatePath, handleStateFixture(worktreePath, 19, 'tab-1', 'pane-1'));
+
+  const result = daemonStep({
+    cwd: worktreePath,
+    statePath: '.agent/herdr-workflow-run.json',
+    handleStatePath: '.agent/herdr-implement.json',
+    runner: createRunner([]),
+    now: () => new Date('2026-06-30T12:34:56.000Z'),
+  });
+
+  assert.equal(result.status, 'continue');
+  assert.equal(result.currentPhase, 'run_script');
+  assert.equal(result.nextPhase, 'done');
+  const runState = readWorkflowRunState(runStatePath);
+  assert.equal(runState?.currentPhase, 'done');
+  assert.equal(runState?.context.greeting, 'hello');
+  assert.equal(runState?.scriptRuns.run_script.outcome, 'success');
+  assert.equal(runState?.scriptRuns.run_script.status, 'complete');
+  assert.equal(runState?.scriptRuns.run_script.exitCode, 0);
+  assert.equal(runState?.scriptRuns.run_script.timedOut, false);
+  assert.equal(runState?.scriptRuns.run_script.stdout.trim(), 'success');
+  assert.equal(runState?.scriptRuns.run_script.stderr.trim(), 'stderr-line');
+  assert.equal(readFileSync(join(worktreePath, '.agent/script-cwd.txt'), 'utf8'), worktreePath);
+  assert.equal(readFileSync(join(worktreePath, '.agent/script-greeting.txt'), 'utf8'), 'hello');
+  assert.equal(readFileSync(join(worktreePath, '.agent/script-args.txt'), 'utf8'), `19,hello,${join(worktreePath, '.agent/script-output.txt')}`);
+  assert.equal(existsSync(runState?.scriptRuns.run_script.stdoutPath ?? ''), true);
+  assert.equal(existsSync(runState?.scriptRuns.run_script.stderrPath ?? ''), true);
+});
+
+test('daemon step merges JSON capture from script stdout into workflow context', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeScriptWorkflowFixture(
+    worktreePath,
+    `#!/bin/sh
+set -eu
+printf '%s\\n' '{"outcome":"success","capture":{"pr_url":"https://example.test/pr/1","pr_number":"1"}}'
+`,
+  );
+
+  const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+  const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
+  writeWorkflowRunState(runStatePath, scriptWorkflowStateFixture(worktreePath, 19));
+  writeDaemonHandleState(handleStatePath, handleStateFixture(worktreePath, 19, 'tab-1', 'pane-1'));
+
+  const result = daemonStep({
+    cwd: worktreePath,
+    statePath: '.agent/herdr-workflow-run.json',
+    handleStatePath: '.agent/herdr-implement.json',
+    runner: createRunner([]),
+    now: () => new Date('2026-06-30T12:34:56.000Z'),
+  });
+
+  assert.equal(result.status, 'continue');
+  const runState = readWorkflowRunState(runStatePath);
+  assert.equal(runState?.currentPhase, 'done');
+  assert.equal(runState?.context.pr_url, 'https://example.test/pr/1');
+  assert.equal(runState?.context.pr_number, '1');
+  assert.equal(runState?.scriptRuns.run_script.capture?.pr_url, 'https://example.test/pr/1');
+});
+
+test('daemon step routes malformed JSON stdout from a script to failure', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeScriptWorkflowFixture(
+    worktreePath,
+    `#!/bin/sh
+set -eu
+printf '%s\\n' '{not-json}'
+`,
+  );
+
+  const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+  const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
+  writeWorkflowRunState(runStatePath, scriptWorkflowStateFixture(worktreePath, 19));
+  writeDaemonHandleState(handleStatePath, handleStateFixture(worktreePath, 19, 'tab-1', 'pane-1'));
+
+  const result = daemonStep({
+    cwd: worktreePath,
+    statePath: '.agent/herdr-workflow-run.json',
+    handleStatePath: '.agent/herdr-implement.json',
+    runner: createRunner([]),
+    now: () => new Date('2026-06-30T12:34:56.000Z'),
+  });
+
+  assert.equal(result.status, 'continue');
+  assert.equal(result.nextPhase, 'failed');
+  const runState = readWorkflowRunState(runStatePath);
+  assert.equal(runState?.currentPhase, 'failed');
+  assert.equal(runState?.scriptRuns.run_script.outcome, 'failure');
+});
+
+test('daemon step routes a missing script command as startup failure', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeScriptWorkflowFixture(
+    worktreePath,
+    `#!/bin/sh
+set -eu
+printf 'success\\n'
+`,
+    { command: 'scripts/missing-script.sh' },
+  );
+
+  const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+  const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
+  writeWorkflowRunState(runStatePath, {
+    ...scriptWorkflowStateFixture(worktreePath, 19),
+    workflow: normalizeWorkflow(scriptWorkflowFixture({ command: 'scripts/missing-script.sh' })) as never,
+  });
+  writeDaemonHandleState(handleStatePath, handleStateFixture(worktreePath, 19, 'tab-1', 'pane-1'));
+
+  const result = daemonStep({
+    cwd: worktreePath,
+    statePath: '.agent/herdr-workflow-run.json',
+    handleStatePath: '.agent/herdr-implement.json',
+    runner: createRunner([]),
+    now: () => new Date('2026-06-30T12:34:56.000Z'),
+  });
+
+  assert.equal(result.status, 'continue');
+  assert.equal(result.nextPhase, 'failed');
+  const runState = readWorkflowRunState(runStatePath);
+  assert.equal(runState?.currentPhase, 'failed');
+  assert.equal(runState?.scriptRuns.run_script.outcome, 'failure');
+});
+
+test('daemon step routes a non-zero script exit without stdout outcome to failure', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeScriptWorkflowFixture(
+    worktreePath,
+    `#!/bin/sh
+set -eu
+exit 7
+`,
+  );
+
+  const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+  const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
+  writeWorkflowRunState(runStatePath, scriptWorkflowStateFixture(worktreePath, 19));
+  writeDaemonHandleState(handleStatePath, handleStateFixture(worktreePath, 19, 'tab-1', 'pane-1'));
+
+  const result = daemonStep({
+    cwd: worktreePath,
+    statePath: '.agent/herdr-workflow-run.json',
+    handleStatePath: '.agent/herdr-implement.json',
+    runner: createRunner([]),
+    now: () => new Date('2026-06-30T12:34:56.000Z'),
+  });
+
+  assert.equal(result.status, 'continue');
+  assert.equal(result.nextPhase, 'failed');
+  const runState = readWorkflowRunState(runStatePath);
+  assert.equal(runState?.currentPhase, 'failed');
+  assert.equal(runState?.scriptRuns.run_script.exitCode, 7);
+  assert.equal(runState?.scriptRuns.run_script.outcome, 'failure');
+});
+
+test('daemon step routes a timeout script to timeout', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeScriptWorkflowFixture(
+    worktreePath,
+    `#!/bin/sh
+set -eu
+while :; do
+  :
+done
+printf 'success\\n'
+`,
+    { timeoutSeconds: 0.05 },
+  );
+
+  const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+  const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
+  writeWorkflowRunState(
+    runStatePath,
+    scriptWorkflowStateFixture(worktreePath, 19, 'run_script', { timeoutSeconds: 0.05 }),
+  );
+  writeDaemonHandleState(handleStatePath, handleStateFixture(worktreePath, 19, 'tab-1', 'pane-1'));
+
+  const result = daemonStep({
+    cwd: worktreePath,
+    statePath: '.agent/herdr-workflow-run.json',
+    handleStatePath: '.agent/herdr-implement.json',
+    runner: createRunner([]),
+    now: () => new Date('2026-06-30T12:34:56.000Z'),
+  });
+
+  assert.equal(result.status, 'continue');
+  assert.equal(result.nextPhase, 'timeout');
+  const runState = readWorkflowRunState(runStatePath);
+  assert.equal(runState?.currentPhase, 'timeout');
+  assert.equal(runState?.scriptRuns.run_script.status, 'timeout');
+  assert.equal(runState?.scriptRuns.run_script.timedOut, true);
+});
+
+test('daemon step does not rerun a completed non-retryable script phase during recovery', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeScriptWorkflowFixture(
+    worktreePath,
+    `#!/bin/sh
+set -eu
+printf 'should-not-run\\n' > .agent/should-not-run.txt
+printf 'success\\n'
+`,
+  );
+
+  const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+  const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
+  writeWorkflowRunState(runStatePath, {
+    ...scriptWorkflowStateFixture(worktreePath, 19),
+    scriptRuns: {
+      run_script: {
+        phaseId: 'run_script',
+        runId: 'issue-19-run_script-script',
+        command: 'scripts/run-script.sh',
+        resolvedCommandPath: join(worktreePath, '.agent/scripts/run-script.sh'),
+        args: ['19', 'hello', join(worktreePath, '.agent/script-output.txt')],
+        cwd: worktreePath,
+        env: {
+          PATH: process.env.PATH ?? '/usr/bin:/bin',
+          HOME: process.env.HOME ?? '',
+          TMPDIR: process.env.TMPDIR ?? '/tmp',
+          PWD: worktreePath,
+          HERDR_ISSUE_CANONICAL: '#19',
+          HERDR_ISSUE_INPUT: '#19',
+          HERDR_ISSUE_NUMBER: '19',
+          HERDR_PHASE_ID: 'run_script',
+          HERDR_RUN_ID: 'issue-19-run_script-script',
+          HERDR_WORKFLOW_PATH: join(worktreePath, '.agent/herdr-workflow.yaml'),
+          HERDR_WORKFLOW_BRANCH: 'issue-19-herdr-implement',
+          HERDR_WORKFLOW_CURRENT_PHASE: 'run_script',
+          HERDR_WORKSPACE_ID: 'w19',
+          HERDR_WORKTREE_PATH: worktreePath,
+          HERDR_TEST_GREETING: 'hello',
+        },
+        timeoutSeconds: 30,
+        startedAt: '2026-06-30T12:00:00.000Z',
+        finishedAt: '2026-06-30T12:00:01.000Z',
+        durationMs: 1000,
+        timedOut: false,
+        exitCode: 0,
+        signal: null,
+        status: 'complete',
+        outcome: 'success',
+        capture: null,
+        stdout: 'success\n',
+        stderr: '',
+        stdoutPath: join(worktreePath, '.agent/runs/issue-19-run_script-script/stdout.log'),
+        stderrPath: join(worktreePath, '.agent/runs/issue-19-run_script-script/stderr.log'),
+        rawOutputPath: join(worktreePath, '.agent/runs/issue-19-run_script-script/raw.log'),
+        retryable: false,
+      },
+    },
+  });
+  writeDaemonHandleState(handleStatePath, handleStateFixture(worktreePath, 19, 'tab-1', 'pane-1'));
+
+  const result = daemonStep({
+    cwd: worktreePath,
+    statePath: '.agent/herdr-workflow-run.json',
+    handleStatePath: '.agent/herdr-implement.json',
+    runner: createRunner([]),
+    now: () => new Date('2026-06-30T12:34:56.000Z'),
+  });
+
+  assert.equal(result.status, 'continue');
+  assert.equal(result.nextPhase, 'done');
+  assert.equal(existsSync(join(worktreePath, '.agent/should-not-run.txt')), false);
+  const runState = readWorkflowRunState(runStatePath);
+  assert.equal(runState?.currentPhase, 'done');
 });
