@@ -13,6 +13,7 @@ import {
   writeDaemonHandleState,
   writeWorkflowRunState,
 } from './runtime.ts';
+import { normalizeWorkflow } from './workflow.ts';
 
 type HerdrCommandResult = {
   stdout: string;
@@ -40,6 +41,50 @@ function workflowFixture(): Record<string, unknown> {
       ready: {
         type: 'terminal',
         status: 'complete',
+      },
+      done: {
+        type: 'terminal',
+        status: 'complete',
+      },
+    },
+  };
+}
+
+function agentWorkflowFixture(reuse = true, promptTemplate = 'implement.md'): Record<string, unknown> {
+  return {
+    name: 'agent-workflow',
+    version: 1,
+    type: 'herdr.issue',
+    start: 'setup',
+    roleDefaults: {
+      agent: 'codex',
+      approval: 'on-request',
+      sandbox: 'workspace-write',
+      reuse,
+    },
+    roles: {
+      implementer: {
+        label: 'implementer',
+        agentNameTemplate: 'issue-{{ issue.number }}-implementer',
+        model: 'gpt-5.4-mini',
+      },
+    },
+    phases: {
+      setup: {
+        type: 'herdr-worktree',
+        on: { success: 'implement' },
+      },
+      implement: {
+        type: 'agent',
+        role: 'implementer',
+        promptTemplate,
+        on: { complete: 'fix' },
+      },
+      fix: {
+        type: 'agent',
+        role: 'implementer',
+        promptTemplate: 'fix.md',
+        on: { complete: 'done' },
       },
       done: {
         type: 'terminal',
@@ -81,6 +126,7 @@ function workflowStateFixture(worktreePath: string, issueNumber: number, current
     workspaceId: `w${issueNumber}`,
     currentPhase,
     context: {},
+    pendingAgentRun: null,
     createdAt: '2026-06-30T12:00:00.000Z',
     updatedAt: '2026-06-30T12:00:00.000Z',
     daemonHandlePath: join(worktreePath, '.agent/herdr-implement.json'),
@@ -102,8 +148,45 @@ function handleStateFixture(worktreePath: string, issueNumber: number, daemonTab
     daemonTabId,
     daemonPaneId,
     daemonCommand: 'node skills/herdr-implement/scripts/daemon.ts',
+    roleAgents: {},
     createdAt: '2026-06-30T12:00:00.000Z',
     updatedAt: '2026-06-30T12:00:00.000Z',
+  };
+}
+
+function agentWorkflowStateFixture(worktreePath: string, issueNumber: number, currentPhase = 'setup', reuse = true) {
+  const workflowPath = join(worktreePath, '.agent/herdr-workflow.yaml');
+  return {
+    schemaVersion: 1 as const,
+    issue: {
+      input: `#${issueNumber}`,
+      number: issueNumber,
+      url: null,
+      canonical: `#${issueNumber}`,
+    },
+    workflowPath,
+    workflow: normalizeWorkflow(agentWorkflowFixture(reuse)) as never,
+    sourceRepo: {
+      rootPath: worktreePath,
+      remoteUrl: null,
+      currentBranch: 'main',
+      baseBranch: 'main',
+    },
+    branchName: `issue-${issueNumber}-herdr-implement`,
+    worktreePath,
+    workspaceId: `w${issueNumber}`,
+    currentPhase,
+    context: {},
+    pendingAgentRun: null,
+    createdAt: '2026-06-30T12:00:00.000Z',
+    updatedAt: '2026-06-30T12:00:00.000Z',
+    daemonHandlePath: join(worktreePath, '.agent/herdr-implement.json'),
+    daemon: {
+      tabId: null,
+      paneId: null,
+      command: null,
+      startedAt: null,
+    },
   };
 }
 
@@ -149,6 +232,57 @@ async function makeWorktreeFixture(worktreePath: string): Promise<void> {
   await mkdir(join(worktreePath, '.agent'), { recursive: true });
   await mkdir(join(worktreePath, 'skills/herdr-implement/workflows'), { recursive: true });
   writeFileSync(join(worktreePath, 'skills/herdr-implement/workflows/default.yaml'), JSON.stringify(workflowFixture(), null, 2), 'utf8');
+}
+
+async function makeAgentWorkflowFixture(worktreePath: string, reuse = true): Promise<void> {
+  await makeWorktreeFixture(worktreePath);
+  await mkdir(join(worktreePath, '.agent/prompts'), { recursive: true });
+  await mkdir(join(worktreePath, 'skills/herdr-implement/prompts'), { recursive: true });
+  writeFileSync(join(worktreePath, '.agent/herdr-workflow.yaml'), JSON.stringify(agentWorkflowFixture(reuse), null, 2), 'utf8');
+  writeFileSync(
+    join(worktreePath, '.agent/prompts/implement.md'),
+    'PROJECT prompt for {{ runId }} / {{ phaseId }} / {{ roleId }} / {{ resultPath }} / {{ notifyTarget }} / {{ requiredOutcome }} / {{ optionalCapture }} / {{ completionUtility }}\n',
+    'utf8',
+  );
+  writeFileSync(
+    join(worktreePath, 'skills/herdr-implement/prompts/implement.md'),
+    'SKILL prompt for {{ runId }}\n',
+    'utf8',
+  );
+  writeFileSync(
+    join(worktreePath, 'skills/herdr-implement/prompts/fix.md'),
+    'SKILL fix prompt for {{ runId }}\n',
+    'utf8',
+  );
+}
+
+function expectedAgentPrompt(input: {
+  runId: string;
+  phaseId: string;
+  roleId: string;
+  resultPath: string;
+  notifyTarget: string;
+  requiredOutcome: string;
+  body: string;
+}): string {
+  return [
+    'Agent run metadata:',
+    `- Run id: ${input.runId}`,
+    `- Phase id: ${input.phaseId}`,
+    `- Role id: ${input.roleId}`,
+    `- Result path: ${input.resultPath}`,
+    `- Notify target: ${input.notifyTarget}`,
+    `- Required outcome: ${input.requiredOutcome}`,
+    '- Optional capture: optional capture value if needed',
+    '',
+    'When complete, write the result artifact and invoke:',
+    '',
+    '```bash',
+    `node skills/herdr-worktree-flow/scripts/agent-run-complete.ts --run-id ${input.runId} --role implementer --phase ${input.phaseId} --result ${input.resultPath} --notify-target ${input.notifyTarget}`,
+    '```',
+    '',
+    input.body,
+  ].join('\n');
 }
 
 test('bootstrap creates worktree-local state and a daemon command that daemon.ts accepts', async () => {
@@ -593,4 +727,367 @@ test('daemon step stops immediately on a terminal phase', async () => {
   assert.equal(result.status, 'stop');
   assert.equal(result.currentPhase, 'done');
   assert.match(result.reason ?? '', /terminal phase/);
+});
+
+test('daemon step lazily starts a role agent and records a pending run', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeAgentWorkflowFixture(worktreePath);
+  const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+  const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
+  writeWorkflowRunState(runStatePath, agentWorkflowStateFixture(worktreePath, 17, 'implement'));
+  writeDaemonHandleState(handleStatePath, handleStateFixture(worktreePath, 17, 'tab-1', 'pane-1'));
+
+  const resultPath = join(worktreePath, '.agent/runs/issue-17-implement-implementer-1/result.json');
+  const expectedPrompt = expectedAgentPrompt({
+    runId: 'issue-17-implement-implementer-1',
+    phaseId: 'implement',
+    roleId: 'implementer',
+    resultPath,
+    notifyTarget: 'issue-17-orchestrator',
+    requiredOutcome: 'complete',
+    body: `PROJECT prompt for issue-17-implement-implementer-1 / implement / implementer / ${resultPath} / issue-17-orchestrator / complete / optional capture value if needed / node skills/herdr-worktree-flow/scripts/agent-run-complete.ts\n`,
+  });
+  const runner = createRunner([
+    {
+      args: [
+        'agent',
+        'start',
+        'issue-17-implementer',
+        '--cwd',
+        worktreePath,
+        '--workspace',
+        'w17',
+        '--focus',
+        '--',
+        'codex',
+        '-a',
+        'on-request',
+        '-m',
+        'gpt-5.4-mini',
+        '-s',
+        'workspace-write',
+      ],
+      result: {
+        stdout: `${JSON.stringify({
+          id: 'cli:agent:start',
+          result: {
+            agent: {
+              name: 'issue-17-implementer',
+              pane_id: 'pane-impl',
+              tab_id: 'tab-source',
+              terminal_id: 'term-impl',
+            },
+          },
+        })}\n`,
+        stderr: '',
+        status: 0,
+      },
+    },
+    {
+      args: ['pane', 'move', 'pane-impl', '--new-tab', '--workspace', 'w17', '--label', 'implementer', '--focus'],
+      result: {
+        stdout: `${JSON.stringify({
+          result: {
+            move_result: {
+              created_tab: { tab_id: 'tab-impl' },
+              pane: { pane_id: 'pane-impl', tab_id: 'tab-impl', terminal_id: 'term-impl' },
+            },
+          },
+        })}\n`,
+        stderr: '',
+        status: 0,
+      },
+    },
+    {
+      args: ['agent', 'send', 'issue-17-implementer', expectedPrompt],
+      result: { stdout: '', stderr: '', status: 0 },
+    },
+    {
+      args: ['pane', 'send-keys', 'pane-impl', 'Return'],
+      result: { stdout: '', stderr: '', status: 0 },
+    },
+  ]);
+
+  const result = daemonStep({
+    cwd: worktreePath,
+    statePath: '.agent/herdr-workflow-run.json',
+    handleStatePath: '.agent/herdr-implement.json',
+    runner,
+    now: () => new Date('2026-06-30T12:34:56.000Z'),
+  });
+
+  assert.equal(result.status, 'sleep');
+  assert.match(result.reason ?? '', /waiting for agent run issue-17-implement-implementer-1/);
+
+  const runState = readWorkflowRunState(runStatePath);
+  assert.equal(runState?.pendingAgentRun?.status, 'pending');
+  assert.equal(runState?.pendingAgentRun?.phaseId, 'implement');
+  assert.equal(runState?.pendingAgentRun?.roleId, 'implementer');
+  assert.equal(runState?.pendingAgentRun?.resultPath, resultPath);
+  assert.equal(runState?.pendingAgentRun?.notifyTarget, 'issue-17-orchestrator');
+  assert.equal(runState?.pendingAgentRun?.attemptNumber, 1);
+
+  const handleState = readDaemonHandleState(handleStatePath);
+  assert.equal(handleState?.roleAgents.implementer.agentName, 'issue-17-implementer');
+  assert.equal(handleState?.roleAgents.implementer.tabId, 'tab-impl');
+  assert.equal(handleState?.roleAgents.implementer.paneId, 'pane-impl');
+  assert.equal(handleState?.roleAgents.implementer.terminalId, 'term-impl');
+});
+
+test('daemon step reuses a recorded role agent when reuse is true', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeAgentWorkflowFixture(worktreePath);
+  const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+  const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
+  writeWorkflowRunState(runStatePath, agentWorkflowStateFixture(worktreePath, 17, 'fix'));
+  writeDaemonHandleState(handleStatePath, {
+    ...handleStateFixture(worktreePath, 17, 'tab-1', 'pane-1'),
+    roleAgents: {
+      implementer: {
+        roleId: 'implementer',
+        roleLabel: 'implementer',
+        agentName: 'issue-17-implementer',
+        tabId: 'tab-impl',
+        paneId: 'pane-impl',
+        terminalId: 'term-impl',
+        createdAt: '2026-06-30T12:00:00.000Z',
+        updatedAt: '2026-06-30T12:00:00.000Z',
+      },
+    },
+  });
+
+  const resultPath = join(worktreePath, '.agent/runs/issue-17-fix-implementer-1/result.json');
+  const expectedPrompt = expectedAgentPrompt({
+    runId: 'issue-17-fix-implementer-1',
+    phaseId: 'fix',
+    roleId: 'implementer',
+    resultPath,
+    notifyTarget: 'issue-17-orchestrator',
+    requiredOutcome: 'complete',
+    body: 'SKILL fix prompt for issue-17-fix-implementer-1\n',
+  });
+  const runner = createRunner([
+    {
+      args: ['agent', 'send', 'issue-17-implementer', expectedPrompt],
+      result: { stdout: '', stderr: '', status: 0 },
+    },
+    {
+      args: ['pane', 'send-keys', 'pane-impl', 'Return'],
+      result: { stdout: '', stderr: '', status: 0 },
+    },
+  ]);
+
+  daemonStep({
+    cwd: worktreePath,
+    statePath: '.agent/herdr-workflow-run.json',
+    handleStatePath: '.agent/herdr-implement.json',
+    runner,
+    now: () => new Date('2026-06-30T12:34:56.000Z'),
+  });
+
+  const runState = readWorkflowRunState(runStatePath);
+  assert.equal(runState?.pendingAgentRun?.runId, 'issue-17-fix-implementer-1');
+  assert.equal(runState?.pendingAgentRun?.resultPath, resultPath);
+});
+
+test('daemon step starts fresh one-off role agents when reuse is false', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeAgentWorkflowFixture(worktreePath, false);
+  const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+  const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
+  writeWorkflowRunState(runStatePath, agentWorkflowStateFixture(worktreePath, 17, 'fix', false));
+  writeDaemonHandleState(handleStatePath, {
+    ...handleStateFixture(worktreePath, 17, 'tab-1', 'pane-1'),
+    roleAgents: {
+      implementer: {
+        roleId: 'implementer',
+        roleLabel: 'implementer',
+        agentName: 'old-agent',
+        tabId: 'old-tab',
+        paneId: 'old-pane',
+        terminalId: 'old-term',
+        createdAt: '2026-06-30T12:00:00.000Z',
+        updatedAt: '2026-06-30T12:00:00.000Z',
+      },
+    },
+  });
+
+  const runner = createRunner([
+    {
+      args: [
+        'agent',
+        'start',
+        'issue-17-implementer-issue-17-fix-implementer-1',
+        '--cwd',
+        worktreePath,
+        '--workspace',
+        'w17',
+        '--focus',
+        '--',
+        'codex',
+        '-a',
+        'on-request',
+        '-m',
+        'gpt-5.4-mini',
+        '-s',
+        'workspace-write',
+      ],
+      result: {
+        stdout: `${JSON.stringify({
+          result: {
+            agent: {
+              name: 'issue-17-implementer-issue-17-fix-implementer-1',
+              pane_id: 'new-pane',
+              terminal_id: 'new-term',
+            },
+          },
+        })}\n`,
+        stderr: '',
+        status: 0,
+      },
+    },
+    {
+      args: ['pane', 'move', 'new-pane', '--new-tab', '--workspace', 'w17', '--label', 'implementer', '--focus'],
+      result: {
+        stdout: `${JSON.stringify({
+          result: {
+            move_result: {
+              created_tab: { tab_id: 'new-tab' },
+              pane: { pane_id: 'new-pane', terminal_id: 'new-term' },
+            },
+          },
+        })}\n`,
+        stderr: '',
+        status: 0,
+      },
+    },
+    {
+      args: [
+        'agent',
+        'send',
+        'issue-17-implementer-issue-17-fix-implementer-1',
+        expectedAgentPrompt({
+          runId: 'issue-17-fix-implementer-1',
+          phaseId: 'fix',
+          roleId: 'implementer',
+          resultPath: join(worktreePath, '.agent/runs/issue-17-fix-implementer-1/result.json'),
+          notifyTarget: 'issue-17-orchestrator',
+          requiredOutcome: 'complete',
+          body: 'SKILL fix prompt for issue-17-fix-implementer-1\n',
+        }),
+      ],
+      result: { stdout: '', stderr: '', status: 0 },
+    },
+    {
+      args: ['pane', 'send-keys', 'new-pane', 'Return'],
+      result: { stdout: '', stderr: '', status: 0 },
+    },
+  ]);
+
+  daemonStep({
+    cwd: worktreePath,
+    statePath: '.agent/herdr-workflow-run.json',
+    handleStatePath: '.agent/herdr-implement.json',
+    runner,
+    now: () => new Date('2026-06-30T12:34:56.000Z'),
+  });
+
+  const handleState = readDaemonHandleState(handleStatePath);
+  assert.equal(handleState?.roleAgents.implementer.paneId, 'new-pane');
+  assert.equal(handleState?.roleAgents.implementer.agentName, 'issue-17-implementer-issue-17-fix-implementer-1');
+});
+
+test('daemon step does not dispatch a duplicate pending agent run after recovery', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeAgentWorkflowFixture(worktreePath);
+  const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+  const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
+  writeWorkflowRunState(runStatePath, {
+    ...agentWorkflowStateFixture(worktreePath, 17, 'implement'),
+    pendingAgentRun: {
+      runId: 'issue-17-implement-implementer-1',
+      phaseId: 'implement',
+      roleId: 'implementer',
+      resultPath: join(worktreePath, '.agent/runs/issue-17-implement-implementer-1/result.json'),
+      notifyTarget: 'issue-17-orchestrator',
+      attemptNumber: 1,
+      startedAt: '2026-06-30T12:00:00.000Z',
+      status: 'pending',
+    },
+  });
+  writeDaemonHandleState(handleStatePath, handleStateFixture(worktreePath, 17, 'tab-1', 'pane-1'));
+
+  const result = daemonStep({
+    cwd: worktreePath,
+    statePath: '.agent/herdr-workflow-run.json',
+    handleStatePath: '.agent/herdr-implement.json',
+    runner: createRunner([]),
+    now: () => new Date('2026-06-30T12:34:56.000Z'),
+  });
+
+  assert.equal(result.status, 'sleep');
+  assert.match(result.reason ?? '', /waiting on pending agent run issue-17-implement-implementer-1/);
+  assert.equal(readWorkflowRunState(runStatePath)?.pendingAgentRun?.runId, 'issue-17-implement-implementer-1');
+});
+
+test('daemon step does not persist a pending run when agent send fails', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeAgentWorkflowFixture(worktreePath);
+  const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+  const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
+  writeWorkflowRunState(runStatePath, agentWorkflowStateFixture(worktreePath, 17, 'fix'));
+  writeDaemonHandleState(handleStatePath, {
+    ...handleStateFixture(worktreePath, 17, 'tab-1', 'pane-1'),
+    roleAgents: {
+      implementer: {
+        roleId: 'implementer',
+        roleLabel: 'implementer',
+        agentName: 'issue-17-implementer',
+        tabId: 'tab-impl',
+        paneId: 'pane-impl',
+        terminalId: 'term-impl',
+        createdAt: '2026-06-30T12:00:00.000Z',
+        updatedAt: '2026-06-30T12:00:00.000Z',
+      },
+    },
+  });
+
+  const runner = createRunner([
+    {
+      args: [
+        'agent',
+        'send',
+        'issue-17-implementer',
+        expectedAgentPrompt({
+          runId: 'issue-17-fix-implementer-1',
+          phaseId: 'fix',
+          roleId: 'implementer',
+          resultPath: join(worktreePath, '.agent/runs/issue-17-fix-implementer-1/result.json'),
+          notifyTarget: 'issue-17-orchestrator',
+          requiredOutcome: 'complete',
+          body: 'SKILL fix prompt for issue-17-fix-implementer-1\n',
+        }),
+      ],
+      result: { stdout: '', stderr: 'send failed', status: 1 },
+    },
+  ]);
+
+  assert.throws(
+    () =>
+      daemonStep({
+        cwd: worktreePath,
+        statePath: '.agent/herdr-workflow-run.json',
+        handleStatePath: '.agent/herdr-implement.json',
+        runner,
+        now: () => new Date('2026-06-30T12:34:56.000Z'),
+      }),
+    /herdr agent send failed/,
+  );
+
+  assert.equal(readWorkflowRunState(runStatePath)?.pendingAgentRun, null);
 });
