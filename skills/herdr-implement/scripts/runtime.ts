@@ -238,19 +238,15 @@ type ResultArtifact = {
   resultSchema: string | null;
 };
 
-type ScriptExecutionResult = {
-  outcome: string;
-  capture: Record<string, unknown> | null;
-  stdout: string;
-  stderr: string;
-  exitCode: number | null;
-  signal: string | null;
-  timedOut: boolean;
-  durationMs: number;
-  status: 'complete' | 'blocked' | 'failed' | 'timeout';
+type ScriptRunStatus = 'complete' | 'blocked' | 'failed' | 'timeout';
+
+type ScriptRunPaths = {
+  stdoutPath: string;
+  stderrPath: string;
+  rawOutputPath: string;
 };
 
-type ScriptPhaseRecord = {
+type ScriptRunCore = {
   phaseId: string;
   runId: string;
   command: string;
@@ -265,15 +261,44 @@ type ScriptPhaseRecord = {
   timedOut: boolean;
   exitCode: number | null;
   signal: string | null;
-  status: 'complete' | 'blocked' | 'failed' | 'timeout';
+  status: ScriptRunStatus;
   outcome: string;
   capture: Record<string, unknown> | null;
   stdout: string;
   stderr: string;
-  stdoutPath: string;
-  stderrPath: string;
-  rawOutputPath: string;
   retryable: boolean;
+};
+
+type ScriptRunLogInput = {
+  command: string;
+  resolvedCommandPath: string;
+  args: string[];
+  cwd: string;
+  env: Record<string, string>;
+  timeoutSeconds: number;
+  startedAt: string;
+  finishedAt: string;
+  stdout: string;
+  stderr: string;
+};
+
+type ScriptFailureInput = Omit<ScriptRunCore, 'capture' | 'timedOut'> & {
+  paths: ScriptRunPaths;
+  message: string;
+  timedOut?: boolean;
+  status?: ScriptRunStatus;
+};
+
+type ScriptExecutionResult = {
+  outcome: string;
+  capture: Record<string, unknown> | null;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  signal: string | null;
+  timedOut: boolean;
+  durationMs: number;
+  status: ScriptRunStatus;
 };
 
 function nowIso(now?: () => Date): string {
@@ -823,7 +848,7 @@ function normalizeScriptRun(value: unknown): ScriptRunState | null {
     return null;
   }
 
-  return {
+  return buildScriptRunState({
     phaseId,
     runId,
     command,
@@ -843,11 +868,13 @@ function normalizeScriptRun(value: unknown): ScriptRunState | null {
     capture,
     stdout,
     stderr,
-    stdoutPath,
-    stderrPath,
-    rawOutputPath,
     retryable,
-  };
+    paths: {
+      stdoutPath,
+      stderrPath,
+      rawOutputPath,
+    },
+  });
 }
 
 function normalizeScriptRunMap(value: unknown): Record<string, ScriptRunState> {
@@ -1171,72 +1198,60 @@ function buildScriptEnvironment(state: WorkflowRunState, phaseId: string, render
   };
 }
 
-function scriptLogContents(command: string, resolvedCommandPath: string, args: string[], cwd: string, env: Record<string, string>, timeoutSeconds: number, startedAt: string, finishedAt: string, stdout: string, stderr: string): string {
+function scriptLogContents(input: ScriptRunLogInput): string {
   return [
-    `command: ${command}`,
-    `resolvedCommandPath: ${resolvedCommandPath}`,
-    `cwd: ${cwd}`,
-    `timeoutSeconds: ${timeoutSeconds}`,
-    `startedAt: ${startedAt}`,
-    `finishedAt: ${finishedAt}`,
-    `args: ${JSON.stringify(args)}`,
-    `env: ${JSON.stringify(env)}`,
+    `command: ${input.command}`,
+    `resolvedCommandPath: ${input.resolvedCommandPath}`,
+    `cwd: ${input.cwd}`,
+    `timeoutSeconds: ${input.timeoutSeconds}`,
+    `startedAt: ${input.startedAt}`,
+    `finishedAt: ${input.finishedAt}`,
+    `args: ${JSON.stringify(input.args)}`,
+    `env: ${JSON.stringify(input.env)}`,
     '',
     '--- stdout ---',
-    stdout,
+    input.stdout,
     '',
     '--- stderr ---',
-    stderr,
+    input.stderr,
     '',
   ].join('\n');
 }
 
-function writeScriptLogFiles(paths: { stdoutPath: string; stderrPath: string; rawOutputPath: string }, stdout: string, stderr: string, rawOutput: string): void {
+function writeScriptLogFiles(paths: ScriptRunPaths, stdout: string, stderr: string, rawOutput: string): void {
   ensureDir(paths.stdoutPath);
   writeFileSync(paths.stdoutPath, stdout, 'utf8');
   writeFileSync(paths.stderrPath, stderr, 'utf8');
   writeFileSync(paths.rawOutputPath, rawOutput, 'utf8');
 }
 
-function createScriptFailureRecord(input: {
-  phaseId: string;
-  runId: string;
-  command: string;
-  resolvedCommandPath: string;
-  args: string[];
-  cwd: string;
-  env: Record<string, string>;
-  timeoutSeconds: number;
-  startedAt: string;
-  finishedAt: string;
-  durationMs: number;
-  stdout: string;
-  stderr: string;
-  paths: { stdoutPath: string; stderrPath: string; rawOutputPath: string };
-  message: string;
-  timedOut?: boolean;
-  exitCode?: number | null;
-  signal?: string | null;
-  outcome?: string;
-  retryable: boolean;
-  status?: ScriptExecutionResult['status'];
-}): ScriptRunState {
+function buildScriptRunState(input: ScriptRunCore & { paths: ScriptRunPaths }): ScriptRunState {
+  const { paths, ...core } = input;
+  return {
+    ...core,
+    ...paths,
+  };
+}
+
+function createScriptFailureRecord(
+  input: ScriptFailureInput,
+): ScriptRunState {
   const stderr = input.stderr ? `${input.stderr}\n${input.message}` : input.message;
-  const rawOutput = scriptLogContents(
-    input.command,
-    input.resolvedCommandPath,
-    input.args,
-    input.cwd,
-    input.env,
-    input.timeoutSeconds,
-    input.startedAt,
-    input.finishedAt,
-    input.stdout,
+  const rawOutput = scriptLogContents({
+    command: input.command,
+    resolvedCommandPath: input.resolvedCommandPath,
+    args: input.args,
+    cwd: input.cwd,
+    env: input.env,
+    timeoutSeconds: input.timeoutSeconds,
+    startedAt: input.startedAt,
+    finishedAt: input.finishedAt,
+    stdout: input.stdout,
     stderr,
-  );
+  });
   writeScriptLogFiles(input.paths, input.stdout, stderr, rawOutput);
 
-  return {
+  return buildScriptRunState({
     phaseId: input.phaseId,
     runId: input.runId,
     command: input.command,
@@ -1256,11 +1271,9 @@ function createScriptFailureRecord(input: {
     capture: null,
     stdout: input.stdout,
     stderr,
-    stdoutPath: input.paths.stdoutPath,
-    stderrPath: input.paths.stderrPath,
-    rawOutputPath: input.paths.rawOutputPath,
     retryable: input.retryable,
-  };
+    paths: input.paths,
+  });
 }
 
 function parseScriptOutcome(stdout: string): { outcome: string; capture: Record<string, unknown> | null } {
@@ -1603,20 +1616,20 @@ function executeScriptPhase(
 
   const outcome = timedOut ? 'timeout' : parsedOutcome.outcome || (exitCode === 0 ? 'success' : 'failure');
   const status = scriptExecutionStatusFrom(outcome, exitCode, timedOut);
-  const rawOutput = scriptLogContents(
+  const rawOutput = scriptLogContents({
     command,
     resolvedCommandPath,
     args,
     cwd,
     env,
     timeoutSeconds,
-    helperStartedAt,
-    helperFinishedAt,
+    startedAt: helperStartedAt,
+    finishedAt: helperFinishedAt,
     stdout,
     stderr,
-  );
+  });
   writeScriptLogFiles(paths, stdout, stderr, rawOutput);
-  const record: ScriptRunState = {
+  const record = buildScriptRunState({
     phaseId,
     runId,
     command,
@@ -1636,11 +1649,9 @@ function executeScriptPhase(
     capture: parsedOutcome.capture,
     stdout,
     stderr,
-    stdoutPath: paths.stdoutPath,
-    stderrPath: paths.stderrPath,
-    rawOutputPath: paths.rawOutputPath,
     retryable: scriptPhaseRetryable(phase),
-  };
+    paths,
+  });
 
   return { record, nextPhase: resolveNextPhase(state.workflow, phaseId, outcome) };
 }
