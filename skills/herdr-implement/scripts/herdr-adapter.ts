@@ -69,14 +69,20 @@ export type HerdrAdapter = {
   readAgentTranscript(agentName: string): string;
 };
 
-type HerdrWorktreeRecord = {
+type RawHerdrWorktreeRecord = {
   workspaceId?: string;
-  workspace_id?: string;
-  worktreePath?: string;
   path?: string;
   cwd?: string;
+  worktreePath?: string;
   branch?: string;
   base?: string;
+};
+
+type NormalizedHerdrWorktreeRecord = {
+  workspaceId: string;
+  worktreePath: string;
+  branch: string;
+  base: string | null;
 };
 
 type WorktreeListOutput = {
@@ -244,7 +250,7 @@ function formatValidationError(label: string, issues: string[]): Error {
   return new Error(`${label} validation failed: ${issues.join('; ')}`);
 }
 
-function safeParseWorktreeRecord(value: unknown, path: string): SafeParseResult<HerdrWorktreeRecord> {
+function safeParseRawWorktreeRecord(value: unknown, path: string): SafeParseResult<RawHerdrWorktreeRecord> {
   if (!isRecord(value)) {
     return { success: false, issues: [`${path} must be an object`] };
   }
@@ -260,15 +266,15 @@ function safeParseWorktreeRecord(value: unknown, path: string): SafeParseResult<
     return { success: false, issues };
   }
 
-  return { success: true, data: value as HerdrWorktreeRecord };
+  return { success: true, data: value as RawHerdrWorktreeRecord };
 }
 
-function safeParseWorktreeRecords(records: unknown[], path: string): SafeParseResult<HerdrWorktreeRecord[]> {
-  const parsed: HerdrWorktreeRecord[] = [];
+function safeParseWorktreeRecords(records: unknown[], path: string): SafeParseResult<RawHerdrWorktreeRecord[]> {
+  const parsed: RawHerdrWorktreeRecord[] = [];
   const issues: string[] = [];
 
   records.forEach((record, index) => {
-    const result = safeParseWorktreeRecord(record, `${path}[${index}]`);
+    const result = safeParseRawWorktreeRecord(record, `${path}[${index}]`);
     if (result.success) {
       parsed.push(result.data);
     } else {
@@ -283,7 +289,7 @@ function safeParseWorktreeRecords(records: unknown[], path: string): SafeParseRe
   return { success: true, data: parsed };
 }
 
-function safeParseWorktreeList(value: unknown): SafeParseResult<HerdrWorktreeRecord[]> {
+function safeParseWorktreeList(value: unknown): SafeParseResult<RawHerdrWorktreeRecord[]> {
   if (Array.isArray(value)) {
     return safeParseWorktreeRecords(value, 'worktree list');
   }
@@ -306,7 +312,7 @@ function safeParseWorktreeList(value: unknown): SafeParseResult<HerdrWorktreeRec
   return { success: false, issues: ['worktree list output must be an array or an object with worktrees/items'] };
 }
 
-function parseWorktreeListOutput(value: unknown): HerdrWorktreeRecord[] {
+function parseWorktreeListOutput(value: unknown): RawHerdrWorktreeRecord[] {
   const parsed = safeParseWorktreeList(value);
   if (!parsed.success) {
     throw formatValidationError('herdr worktree list output', parsed.issues);
@@ -314,11 +320,11 @@ function parseWorktreeListOutput(value: unknown): HerdrWorktreeRecord[] {
   return parsed.data;
 }
 
-function safeParseWorktreeCreate(value: unknown): SafeParseResult<HerdrWorktreeRecord> {
-  return safeParseWorktreeRecord(value, 'worktree create');
+function safeParseWorktreeCreate(value: unknown): SafeParseResult<RawHerdrWorktreeRecord> {
+  return safeParseRawWorktreeRecord(value, 'worktree create');
 }
 
-function parseWorktreeCreateOutput(value: unknown): HerdrWorktreeRecord {
+function parseWorktreeCreateOutput(value: unknown): RawHerdrWorktreeRecord {
   const parsed = safeParseWorktreeCreate(value);
   if (!parsed.success) {
     throw formatValidationError('herdr worktree create output', parsed.issues);
@@ -552,40 +558,54 @@ function buildWorktreeCreateArgs(repository: RepositoryInfo, branchName: string,
   ];
 }
 
-function chooseWorktreeRecord(records: HerdrWorktreeRecord[], branchName: string): HerdrWorktreeRecord | null {
-  return records.find((record) => record.branch === branchName) ?? null;
+function workspaceIdFromRaw(record: RawHerdrWorktreeRecord): string | null {
+  const raw = record as Record<string, unknown>;
+  return optionalString(raw.workspaceId) ?? optionalString(raw.workspace_id);
 }
 
-function resolveWorktreePath(record: HerdrWorktreeRecord | null, fallbackBranch: string): string {
-  if (!record) {
-    return fallbackBranch;
+function worktreePathFromRaw(record: RawHerdrWorktreeRecord): string | null {
+  return optionalString(record.worktreePath) ?? optionalString(record.path) ?? optionalString(record.cwd);
+}
+
+function normalizeWorktreeRecord(record: RawHerdrWorktreeRecord, label: string): NormalizedHerdrWorktreeRecord {
+  const workspaceId = workspaceIdFromRaw(record);
+  const worktreePath = worktreePathFromRaw(record);
+  const branch = optionalString(record.branch);
+  const issues: string[] = [];
+
+  if (!workspaceId) {
+    issues.push(`${label} did not include a workspace id`);
+  }
+  if (!worktreePath) {
+    issues.push(`${label} did not include a worktree path`);
+  }
+  if (!branch) {
+    issues.push(`${label} did not include a branch`);
   }
 
-  return record.worktreePath ?? record.path ?? fallbackBranch;
+  if (issues.length > 0) {
+    throw formatValidationError(label, issues);
+  }
+
+  return {
+    workspaceId: workspaceId!,
+    worktreePath: worktreePath!,
+    branch: branch!,
+    base: optionalString(record.base),
+  };
 }
 
-function resolveWorkspaceId(record: HerdrWorktreeRecord | null): string | null {
+function chooseWorktreeRecord(
+  records: RawHerdrWorktreeRecord[],
+  branchName: string,
+  label: string,
+): NormalizedHerdrWorktreeRecord | null {
+  const record = records.find((entry) => optionalString(entry.branch) === branchName) ?? null;
   if (!record) {
     return null;
   }
 
-  return record.workspaceId ?? record.workspace_id ?? null;
-}
-
-function requireWorkspaceId(workspaceId: string | null, branchName: string): string {
-  if (!workspaceId) {
-    throw new Error(`Herdr worktree record for ${branchName} is missing a workspace id`);
-  }
-
-  return workspaceId;
-}
-
-function requireWorktreePath(path: string | null, branchName: string): string {
-  if (!path || path === branchName) {
-    throw new Error(`Herdr worktree record for ${branchName} is missing a worktree path`);
-  }
-
-  return path;
+  return normalizeWorktreeRecord(record, label);
 }
 
 function createWorktreeIfNeeded(
@@ -595,31 +615,22 @@ function createWorktreeIfNeeded(
   issueLabel: string,
 ): WorktreeInfo {
   const worktreeList = parseWorktreeListOutput(unwrapHerdrResult(safeRunHerdrJson(runner, buildWorktreeListArgs(repository.rootPath))));
-  const existing = chooseWorktreeRecord(worktreeList, branchName);
+  const existing = chooseWorktreeRecord(worktreeList, branchName, 'worktree list');
   if (existing) {
-    const workspaceId = requireWorkspaceId(resolveWorkspaceId(existing), branchName);
-    const worktreePath = requireWorktreePath(resolveWorktreePath(existing, branchName), branchName);
-
     return {
-      workspaceId,
-      worktreePath,
-      branchName,
+      workspaceId: existing.workspaceId,
+      worktreePath: existing.worktreePath,
+      branchName: existing.branch,
     };
   }
 
   const created = unwrapHerdrResult(safeRunHerdrJson(runner, buildWorktreeCreateArgs(repository, branchName, issueLabel)));
-  const createdRecord = parseWorktreeCreateOutput(created);
-  const workspaceId = optionalString(createdRecord.workspaceId) ?? optionalString(createdRecord.workspace_id);
-  const worktreePath =
-    optionalString(createdRecord.worktreePath) ?? optionalString(createdRecord.path) ?? optionalString(createdRecord.cwd);
-
-  const resolvedList = parseWorktreeListOutput(unwrapHerdrResult(safeRunHerdrJson(runner, buildWorktreeListArgs(repository.rootPath))));
-  const resolved = chooseWorktreeRecord(resolvedList, branchName);
+  const createdRecord = normalizeWorktreeRecord(parseWorktreeCreateOutput(created), 'worktree create');
 
   return {
-    workspaceId: requireWorkspaceId(workspaceId ?? resolveWorkspaceId(resolved), branchName),
-    worktreePath: requireWorktreePath(worktreePath ?? resolveWorktreePath(resolved, branchName), branchName),
-    branchName,
+    workspaceId: createdRecord.workspaceId,
+    worktreePath: createdRecord.worktreePath,
+    branchName: createdRecord.branch,
   };
 }
 

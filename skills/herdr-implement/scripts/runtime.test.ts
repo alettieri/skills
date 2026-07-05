@@ -671,16 +671,6 @@ test('bootstrap creates worktree-local state and a daemon command that daemon.ts
       },
     },
     {
-      args: ['worktree', 'list', '--cwd', repoRoot, '--json'],
-      result: {
-        stdout: `${JSON.stringify([
-          { workspaceId: 'w16', worktreePath, branch: 'issue-16-herdr-implement' },
-        ])}\n`,
-        stderr: '',
-        status: 0,
-      },
-    },
-    {
       args: ['tab', 'create', '--workspace', 'w16', '--cwd', worktreePath, '--label', 'herdr-implement-daemon', '--focus'],
       result: { stdout: 'tab-1\n', stderr: '', status: 0 },
     },
@@ -867,16 +857,6 @@ test('bootstrap does not reuse an unrelated Herdr worktree', async () => {
       },
     },
     {
-      args: ['worktree', 'list', '--cwd', repoRoot, '--json'],
-      result: {
-        stdout: `${JSON.stringify([
-          { workspaceId: 'w16', worktreePath: requestedWorktreePath, branch: 'issue-16-herdr-implement' },
-        ])}\n`,
-        stderr: '',
-        status: 0,
-      },
-    },
-    {
       args: ['tab', 'create', '--workspace', 'w16', '--cwd', requestedWorktreePath, '--label', 'herdr-implement-daemon', '--focus'],
       result: { stdout: 'tab-1\n', stderr: '', status: 0 },
     },
@@ -974,16 +954,6 @@ test('bootstrap rejects malformed Herdr pane output before recording daemon hand
       },
     },
     {
-      args: ['worktree', 'list', '--cwd', repoRoot, '--json'],
-      result: {
-        stdout: `${JSON.stringify([
-          { workspaceId: 'w16', worktreePath, branch: 'issue-16-herdr-implement' },
-        ])}\n`,
-        stderr: '',
-        status: 0,
-      },
-    },
-    {
       args: ['tab', 'create', '--workspace', 'w16', '--cwd', worktreePath, '--label', 'herdr-implement-daemon', '--focus'],
       result: { stdout: '{"tabId":17}\n', stderr: '', status: 0 },
     },
@@ -1052,16 +1022,6 @@ test('bootstrap fails when pane run fails before recording started handles', asy
           worktreePath,
           branch: 'issue-16-herdr-implement',
         })}\n`,
-        stderr: '',
-        status: 0,
-      },
-    },
-    {
-      args: ['worktree', 'list', '--cwd', repoRoot, '--json'],
-      result: {
-        stdout: `${JSON.stringify([
-          { workspaceId: 'w16', worktreePath, branch: 'issue-16-herdr-implement' },
-        ])}\n`,
         stderr: '',
         status: 0,
       },

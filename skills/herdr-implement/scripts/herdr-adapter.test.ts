@@ -265,6 +265,24 @@ test('adapter throws on malformed JSON and invalid shapes', async () => {
   assert.throws(() => adapter.createDaemonPane('w1', repo.rootPath), /tab create.tabId must be a string when present/);
 });
 
+test('adapter throws when successful worktree output omits required fields', async () => {
+  const repo = await tempRepo();
+  const adapter = createHerdrAdapter(
+    createRunner([
+      {
+        args: ['worktree', 'list', '--cwd', repo.rootPath, '--json'],
+        result: {
+          stdout: `${JSON.stringify([{ branch: 'issue-1-herdr-implement', path: '/tmp/worktree-1' }])}\n`,
+          stderr: '',
+          status: 0,
+        },
+      },
+    ]),
+  );
+
+  assert.throws(() => adapter.ensureWorktree(repo, 'issue-1-herdr-implement', 'issue-1'), /did not include a workspace id/);
+});
+
 test('adapter throws when successful agent get output is shape-invalid', async () => {
   for (const stdout of ['[]\n', '{}\n', `${JSON.stringify({ result: {} })}\n`]) {
     const adapter = createHerdrAdapter(
