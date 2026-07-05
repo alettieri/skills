@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { createFakeRunner, createHerdrAdapter, type HerdrCommandResult, type RepositoryInfo } from './herdr-adapter.ts';
 
-function createRunner(expectations: Array<{ args: string[]; result: HerdrCommandResult }>) {
+function createRunner(expectations: Array<{ args: readonly string[]; result: HerdrCommandResult }>) {
   return createFakeRunner(expectations);
 }
 

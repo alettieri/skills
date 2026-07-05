@@ -11,7 +11,7 @@ export type HerdrCommandResult = {
 };
 
 export type HerdrCommandRunner = {
-  run(args: string[]): HerdrCommandResult;
+  run(args: readonly string[]): HerdrCommandResult;
 };
 
 export type RepositoryInfo = {
@@ -69,13 +69,16 @@ export type HerdrAdapter = {
   readAgentTranscript(agentName: string): string;
 };
 
+// Raw Herdr worktree payloads stay loose at the boundary because Herdr may
+// emit either camelCase or snake_case keys, and fields can be omitted until we
+// normalize them below.
 type RawHerdrWorktreeRecord = {
-  workspaceId?: string;
-  path?: string;
-  cwd?: string;
-  worktreePath?: string;
-  branch?: string;
-  base?: string;
+  readonly workspaceId?: string;
+  readonly path?: string;
+  readonly cwd?: string;
+  readonly worktreePath?: string;
+  readonly branch?: string;
+  readonly base?: string;
 };
 
 type NormalizedHerdrWorktreeRecord = {
@@ -85,10 +88,51 @@ type NormalizedHerdrWorktreeRecord = {
   base: string | null;
 };
 
+// Herdr has used both `worktrees` and `items` for list envelopes. The array
+// elements stay `unknown` so each record is validated at the parser boundary.
 type WorktreeListOutput = {
-  worktrees?: unknown[];
-  items?: unknown[];
+  readonly worktrees?: readonly unknown[];
+  readonly items?: readonly unknown[];
 };
+
+type HerdrWorktreeListArgs = readonly ['worktree', 'list', '--cwd', string, '--json'];
+type HerdrWorktreeCreateArgs = readonly [
+  'worktree',
+  'create',
+  '--cwd',
+  string,
+  '--branch',
+  string,
+  '--base',
+  string,
+  '--label',
+  string,
+  '--focus',
+  '--json',
+];
+type HerdrAgentStartArgs = readonly [
+  'agent',
+  'start',
+  string,
+  '--cwd',
+  string,
+  '--workspace',
+  string,
+  '--focus',
+  '--',
+  'codex',
+  '-a',
+  string,
+  '-m',
+  string,
+  '-s',
+  string,
+];
+type HerdrAgentMoveArgs = readonly ['pane', 'move', string, '--new-tab', '--workspace', string, '--label', string, '--focus'];
+type HerdrAgentSendArgs = readonly ['agent', 'send', string, string];
+type HerdrAgentSendEnterArgs = readonly ['pane', 'send-keys', string, 'Return'];
+type HerdrAgentGetArgs = readonly ['agent', 'get', string];
+type HerdrAgentReadArgs = readonly ['agent', 'read', string];
 
 type SafeParseResult<T> =
   | { success: true; data: T }
@@ -179,7 +223,7 @@ function detectRepositoryInfo(cwd: string): RepositoryInfo {
 
 function buildDefaultRunner(): HerdrCommandRunner {
   return {
-    run(args: string[]): HerdrCommandResult {
+    run(args: readonly string[]): HerdrCommandResult {
       const result = spawnSync('herdr', args, {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -269,7 +313,7 @@ function safeParseRawWorktreeRecord(value: unknown, path: string): SafeParseResu
   return { success: true, data: value as RawHerdrWorktreeRecord };
 }
 
-function safeParseWorktreeRecords(records: unknown[], path: string): SafeParseResult<RawHerdrWorktreeRecord[]> {
+function safeParseWorktreeRecords(records: readonly unknown[], path: string): SafeParseResult<readonly RawHerdrWorktreeRecord[]> {
   const parsed: RawHerdrWorktreeRecord[] = [];
   const issues: string[] = [];
 
@@ -289,7 +333,7 @@ function safeParseWorktreeRecords(records: unknown[], path: string): SafeParseRe
   return { success: true, data: parsed };
 }
 
-function safeParseWorktreeList(value: unknown): SafeParseResult<RawHerdrWorktreeRecord[]> {
+function safeParseWorktreeList(value: unknown): SafeParseResult<readonly RawHerdrWorktreeRecord[]> {
   if (Array.isArray(value)) {
     return safeParseWorktreeRecords(value, 'worktree list');
   }
@@ -312,7 +356,7 @@ function safeParseWorktreeList(value: unknown): SafeParseResult<RawHerdrWorktree
   return { success: false, issues: ['worktree list output must be an array or an object with worktrees/items'] };
 }
 
-function parseWorktreeListOutput(value: unknown): RawHerdrWorktreeRecord[] {
+function parseWorktreeListOutput(value: unknown): readonly RawHerdrWorktreeRecord[] {
   const parsed = safeParseWorktreeList(value);
   if (!parsed.success) {
     throw formatValidationError('herdr worktree list output', parsed.issues);
@@ -454,7 +498,7 @@ function requirePaneInfo(value: unknown, label: string): HerdrPaneInfo {
   return paneInfo;
 }
 
-function safeRunHerdrJson(runner: HerdrCommandRunner, args: string[]): unknown {
+function safeRunHerdrJson(runner: HerdrCommandRunner, args: readonly string[]): unknown {
   const result = runner.run(args);
   if (result.error) {
     throw result.error;
@@ -476,7 +520,7 @@ function safeRunHerdrJson(runner: HerdrCommandRunner, args: string[]): unknown {
   }
 }
 
-function safeRunHerdrCommand(runner: HerdrCommandRunner, args: string[]): void {
+function safeRunHerdrCommand(runner: HerdrCommandRunner, args: readonly string[]): void {
   const result = runner.run(args);
   if (result.error) {
     throw result.error;
@@ -492,7 +536,7 @@ function buildAgentStartArgs(
   worktreePath: string,
   workspaceId: string,
   role: Record<string, unknown>,
-): string[] {
+): HerdrAgentStartArgs {
   const approval = requireString(role.approval, 'roles.approval');
   const sandbox = requireString(role.sandbox, 'roles.sandbox');
   const model = requireString(role.model, 'roles.model');
@@ -517,31 +561,31 @@ function buildAgentStartArgs(
   ];
 }
 
-function buildAgentMoveArgs(paneId: string, workspaceId: string, roleLabel: string): string[] {
+function buildAgentMoveArgs(paneId: string, workspaceId: string, roleLabel: string): HerdrAgentMoveArgs {
   return ['pane', 'move', paneId, '--new-tab', '--workspace', workspaceId, '--label', roleLabel, '--focus'];
 }
 
-function buildAgentSendArgs(agentName: string, prompt: string): string[] {
+function buildAgentSendArgs(agentName: string, prompt: string): HerdrAgentSendArgs {
   return ['agent', 'send', agentName, prompt];
 }
 
-function buildAgentSendEnterArgs(paneId: string): string[] {
+function buildAgentSendEnterArgs(paneId: string): HerdrAgentSendEnterArgs {
   return ['pane', 'send-keys', paneId, 'Return'];
 }
 
-function buildAgentGetArgs(agentName: string): string[] {
+function buildAgentGetArgs(agentName: string): HerdrAgentGetArgs {
   return ['agent', 'get', agentName];
 }
 
-function buildAgentReadArgs(agentName: string): string[] {
+function buildAgentReadArgs(agentName: string): HerdrAgentReadArgs {
   return ['agent', 'read', agentName];
 }
 
-function buildWorktreeListArgs(rootPath: string): string[] {
+function buildWorktreeListArgs(rootPath: string): HerdrWorktreeListArgs {
   return ['worktree', 'list', '--cwd', rootPath, '--json'];
 }
 
-function buildWorktreeCreateArgs(repository: RepositoryInfo, branchName: string, issueLabel: string): string[] {
+function buildWorktreeCreateArgs(repository: RepositoryInfo, branchName: string, issueLabel: string): HerdrWorktreeCreateArgs {
   return [
     'worktree',
     'create',
@@ -596,7 +640,7 @@ function normalizeWorktreeRecord(record: RawHerdrWorktreeRecord, label: string):
 }
 
 function chooseWorktreeRecord(
-  records: RawHerdrWorktreeRecord[],
+  records: readonly RawHerdrWorktreeRecord[],
   branchName: string,
   label: string,
 ): NormalizedHerdrWorktreeRecord | null {
@@ -889,10 +933,10 @@ export function createHerdrAdapter(runner: HerdrCommandRunner = buildDefaultRunn
   };
 }
 
-export function createFakeRunner(responses: Array<{ args: string[]; result: HerdrCommandResult }>): HerdrCommandRunner {
+export function createFakeRunner(responses: Array<{ args: readonly string[]; result: HerdrCommandResult }>): HerdrCommandRunner {
   let index = 0;
   return {
-    run(args: string[]): HerdrCommandResult {
+    run(args: readonly string[]): HerdrCommandResult {
       assert.equal(index < responses.length, true, `unexpected herdr command: ${args.join(' ')}`);
       const expected = responses[index];
       index += 1;
