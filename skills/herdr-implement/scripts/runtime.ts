@@ -5,6 +5,12 @@ import { spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { loadWorkflow } from './workflow.ts';
 import type { NormalizedPhase, NormalizedWorkflow } from './workflow.ts';
+import {
+  executeScriptPhase,
+  normalizeScriptRunMap,
+  recoverCompletedScriptPhase,
+  type ScriptRunState,
+} from './script-phase.ts';
 
 export const RUN_STATE_PATH = '.agent/herdr-workflow-run.json';
 export const HANDLE_STATE_PATH = '.agent/herdr-implement.json';
@@ -108,6 +114,7 @@ export type WorkflowRunState = {
   context: Record<string, unknown>;
   pendingAgentRun: PendingAgentRunState | null;
   acceptedAgentRuns: Record<string, AcceptedAgentRunState>;
+  scriptRuns: Record<string, ScriptRunState>;
   createdAt: string;
   updatedAt: string;
   daemonHandlePath: string;
@@ -684,6 +691,7 @@ function normalizeWorkflowRunState(value: Record<string, unknown>): WorkflowRunS
     ...(value as WorkflowRunState),
     pendingAgentRun: normalizePendingAgentRun(value.pendingAgentRun),
     acceptedAgentRuns: normalizeAcceptedAgentRunMap(value.acceptedAgentRuns),
+    scriptRuns: normalizeScriptRunMap(value.scriptRuns),
     context,
   };
 }
@@ -1825,6 +1833,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     },
     pendingAgentRun: null,
     acceptedAgentRuns: {},
+    scriptRuns: {},
     createdAt,
     updatedAt: createdAt,
     daemonHandlePath: handleStatePath,
@@ -2272,6 +2281,17 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
     };
   }
 
+  const recoveredScriptState = recoverCompletedScriptPhase(advanced);
+  if (recoveredScriptState) {
+    saveRunState(statePath, recoveredScriptState.state);
+    return {
+      status: recoveredScriptState.nextPhase ? 'continue' : 'stop',
+      currentPhase: advanced.currentPhase,
+      nextPhase: recoveredScriptState.nextPhase ?? undefined,
+      reason: `recovered completed script phase ${advanced.currentPhase}`,
+    };
+  }
+
   if (hasPendingAgentRun(advanced)) {
     const processed = processPendingAgentRun(runner, advanced, handleState, statePath, now);
     return processed.result;
@@ -2279,6 +2299,27 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
 
   const currentPhase = advanced.currentPhase;
   const phase = advanced.workflow.phases[currentPhase];
+  if (phase?.type === 'script') {
+    const executed = executeScriptPhase({ state: advanced, phaseId: currentPhase, phase });
+    const updatedAt = executed.record.finishedAt;
+    const updatedState: WorkflowRunState = {
+      ...advanced,
+      currentPhase: executed.nextPhase ?? advanced.currentPhase,
+      scriptRuns: {
+        ...advanced.scriptRuns,
+        [currentPhase]: executed.record,
+      },
+      updatedAt,
+      context: mergeCaptureIntoContext(advanced.context, executed.record.capture),
+    };
+    saveRunState(statePath, updatedState);
+    return {
+      status: executed.nextPhase ? 'continue' : 'stop',
+      currentPhase,
+      nextPhase: executed.nextPhase ?? undefined,
+      reason: `script phase ${currentPhase} completed with ${executed.record.outcome}`,
+    };
+  }
   if (phase?.type === 'agent') {
     const dispatched = dispatchAgentPhase(runner, cwd, statePath, handleStatePath, advanced, handleState, currentPhase, now);
     return dispatched.result;
