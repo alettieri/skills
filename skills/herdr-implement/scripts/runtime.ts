@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { loadWorkflow } from './workflow.ts';
 import type { NormalizedPhase, NormalizedWorkflow } from './workflow.ts';
+import { createHerdrAdapter, type HerdrAdapter } from './herdr-adapter.ts';
 import {
   executeScriptPhase,
   normalizeScriptRunMap,
@@ -130,6 +131,7 @@ export type BootstrapOptions = {
   cwd?: string;
   issue: string;
   runner?: HerdrCommandRunner;
+  adapter?: HerdrAdapter;
   now?: () => Date;
 };
 
@@ -160,9 +162,14 @@ export type DaemonOptions = {
   statePath?: string;
   handleStatePath?: string;
   runner?: HerdrCommandRunner;
+  adapter?: HerdrAdapter;
   now?: () => Date;
   sleepMs?: number;
 };
+
+function resolveHerdrAdapter(options: { runner?: HerdrCommandRunner; adapter?: HerdrAdapter }): HerdrAdapter {
+  return options.adapter ?? createHerdrAdapter(options.runner);
+}
 
 type HerdrWorktreeRecord = {
   workspaceId?: string;
@@ -1105,7 +1112,7 @@ function stopAfterArtifactRewriteDeliveryFailure(
 }
 
 function rewritePendingArtifact(
-  runner: HerdrCommandRunner,
+  adapter: HerdrAdapter,
   statePath: string,
   state: WorkflowRunState,
   handleState: DaemonHandleState,
@@ -1139,51 +1146,33 @@ function rewritePendingArtifact(
     'Rewrite the JSON result artifact at the recorded path and then rerun the completion utility.',
   ].join('\n');
 
-  const sendResult = runner.run(buildAgentSendArgs(agentName, prompt));
-  if (sendResult.error) {
+  try {
+    adapter.sendPrompt(agentName, prompt);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     return stopAfterArtifactRewriteDeliveryFailure(
       statePath,
       state,
       handleState,
       pendingRun,
       reason,
-      `unable to deliver artifact rewrite request for ${pendingRun.runId}: ${sendResult.error.message}`,
-      now,
-    );
-  }
-  if (sendResult.status !== 0) {
-    return stopAfterArtifactRewriteDeliveryFailure(
-      statePath,
-      state,
-      handleState,
-      pendingRun,
-      reason,
-      `unable to deliver artifact rewrite request for ${pendingRun.runId}: ${sendResult.stderr.trim()}`,
+      `unable to deliver artifact rewrite request for ${pendingRun.runId}: ${message}`,
       now,
     );
   }
 
   if (roleAgent?.paneId) {
-    const enterResult = runner.run(buildAgentSendEnterArgs(roleAgent.paneId));
-    if (enterResult.error) {
+    try {
+      adapter.submitPrompt(roleAgent.paneId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       return stopAfterArtifactRewriteDeliveryFailure(
         statePath,
         state,
         handleState,
         pendingRun,
         reason,
-        `unable to deliver rewrite completion to ${agentName}: ${enterResult.error.message}`,
-        now,
-      );
-    }
-    if (enterResult.status !== 0) {
-      return stopAfterArtifactRewriteDeliveryFailure(
-        statePath,
-        state,
-        handleState,
-        pendingRun,
-        reason,
-        `unable to deliver rewrite completion to ${agentName}: ${enterResult.stderr.trim()}`,
+        `unable to deliver rewrite completion to ${agentName}: ${message}`,
         now,
       );
     }
@@ -1392,8 +1381,7 @@ function saveRoleAgent(handleState: DaemonHandleState, roleAgent: RoleAgentState
 }
 
 function launchRoleAgent(
-  runner: HerdrCommandRunner,
-  cwd: string,
+  adapter: HerdrAdapter,
   state: WorkflowRunState,
   handleState: DaemonHandleState,
   phaseId: string,
@@ -1411,26 +1399,24 @@ function launchRoleAgent(
   }
 
   const now = nowIso();
-  const startResult = normalizeAgentLaunchResult(
-    runHerdrJson(
-      runner,
-      buildAgentStartArgs(agentName, state.worktreePath, state.workspaceId, role),
-    ),
+  const launched = adapter.launchRoleAgent(
+    state.worktreePath,
+    state.workspaceId,
+    role,
+    requireString(role.label, `roles.${roleId}.label`),
+    agentName,
   );
-  if (!startResult.paneId) {
+  if (!launched.paneId) {
     throw new Error(`herdr agent start for ${agentName} did not include a pane id`);
   }
-  const movedResult = normalizePaneInfo(
-    runHerdrJson(runner, buildAgentMoveArgs(startResult.paneId, state.workspaceId, requireString(role.label, `roles.${roleId}.label`))),
-  );
 
   const roleAgent: RoleAgentState = {
     roleId,
     roleLabel: requireString(role.label, `roles.${roleId}.label`),
     agentName,
-    tabId: movedResult.tabId ?? startResult.tabId,
-    paneId: movedResult.paneId ?? startResult.paneId,
-    terminalId: movedResult.terminalId ?? startResult.terminalId,
+    tabId: launched.tabId,
+    paneId: launched.paneId,
+    terminalId: launched.terminalId,
     createdAt: now,
     updatedAt: now,
   };
@@ -1492,7 +1478,7 @@ function renderAgentPhasePrompt(
 }
 
 function dispatchAgentPhase(
-  runner: HerdrCommandRunner,
+  adapter: HerdrAdapter,
   cwd: string,
   statePath: string,
   handleStatePath: string,
@@ -1534,7 +1520,7 @@ function dispatchAgentPhase(
   let nextHandleState = handleState;
   let roleAgent = reusedRole;
   if (!roleAgent) {
-    const launched = launchRoleAgent(runner, cwd, state, nextHandleState, phaseId, roleId, agentName);
+    const launched = launchRoleAgent(adapter, state, nextHandleState, phaseId, roleId, agentName);
     nextHandleState = launched.handleState;
     roleAgent = launched.roleAgent;
   }
@@ -1545,21 +1531,8 @@ function dispatchAgentPhase(
 
   const prompt = renderAgentPhasePrompt(cwd, state, phaseId, roleId, pendingRun).prompt;
 
-  const sendResult = runner.run(buildAgentSendArgs(roleAgent.agentName, prompt));
-  if (sendResult.error) {
-    throw sendResult.error;
-  }
-  if (sendResult.status !== 0) {
-    throw new Error(`herdr agent send failed with exit ${sendResult.status}: ${sendResult.stderr.trim()}`);
-  }
-
-  const enterResult = runner.run(buildAgentSendEnterArgs(roleAgent.paneId));
-  if (enterResult.error) {
-    throw enterResult.error;
-  }
-  if (enterResult.status !== 0) {
-    throw new Error(`herdr pane send-keys failed with exit ${enterResult.status}: ${enterResult.stderr.trim()}`);
-  }
+  adapter.sendPrompt(roleAgent.agentName, prompt);
+  adapter.submitPrompt(roleAgent.paneId);
 
   const updatedRunState: WorkflowRunState = {
     ...state,
@@ -1586,140 +1559,38 @@ function dispatchAgentPhase(
 }
 
 function createWorktreeIfNeeded(
-  runner: HerdrCommandRunner,
+  adapter: HerdrAdapter,
   repository: RepositoryInfo,
   branchName: string,
   issueLabel: string,
 ): WorktreeInfo {
-  const worktreeList = parseWorktreeListOutput(
-    runHerdrJson(runner, ['worktree', 'list', '--cwd', repository.rootPath, '--json']),
-  );
-  const existing = chooseWorktreeRecord(worktreeList, branchName);
-  if (existing) {
-    const workspaceId = requireWorkspaceId(resolveWorkspaceId(existing), branchName);
-    const worktreePath = requireWorktreePath(resolveWorktreePath(existing, branchName), branchName);
-
-    return {
-      workspaceId,
-      worktreePath,
-      branchName,
-    };
-  }
-
-  const created = runHerdrJson(runner, [
-    'worktree',
-    'create',
-    '--cwd',
-    repository.rootPath,
-    '--branch',
-    branchName,
-    '--base',
-    repository.baseBranch,
-    '--label',
-    issueLabel,
-    '--focus',
-    '--json',
-  ]);
-
-  const createdRecord = parseWorktreeCreateOutput(created);
-  const workspaceId = optionalString(createdRecord.workspaceId) ?? optionalString(createdRecord.workspace_id);
-  const worktreePath =
-    optionalString(createdRecord.worktreePath) ?? optionalString(createdRecord.path) ?? optionalString(createdRecord.cwd);
-
-  const resolvedList = parseWorktreeListOutput(
-    runHerdrJson(runner, ['worktree', 'list', '--cwd', repository.rootPath, '--json']),
-  );
-  const resolved = chooseWorktreeRecord(resolvedList, branchName);
-
-  return {
-    workspaceId: requireWorkspaceId(workspaceId ?? resolveWorkspaceId(resolved), branchName),
-    worktreePath: requireWorktreePath(worktreePath ?? resolveWorktreePath(resolved, branchName), branchName),
-    branchName,
-  };
+  return adapter.ensureWorktree(repository, branchName, issueLabel);
 }
 
 function createDaemonPane(
-  runner: HerdrCommandRunner,
+  adapter: HerdrAdapter,
   workspaceId: string,
   worktreePath: string,
   daemonCommand: string,
 ): { tabId: string | null; paneId: string | null } {
-  const tabCreate = runner.run([
-    'tab',
-    'create',
-    '--workspace',
-    workspaceId,
-    '--cwd',
-    worktreePath,
-    '--label',
-    DEFAULT_DAEMON_LABEL,
-    '--focus',
-  ]);
-
-  if (tabCreate.error) {
-    throw tabCreate.error;
-  }
-  if (tabCreate.status !== 0) {
-    throw new Error(`herdr tab create failed with exit ${tabCreate.status}: ${tabCreate.stderr.trim()}`);
-  }
-
-  const tabOutput = parseMaybeJson(tabCreate.stdout);
-  const tabId = parsePaneReference(tabOutput, 'tab create', false).id;
-
-  const paneCurrent = runner.run(['pane', 'current', '--current']);
-  if (paneCurrent.error) {
-    throw paneCurrent.error;
-  }
-  if (paneCurrent.status !== 0) {
-    throw new Error(`herdr pane current failed with exit ${paneCurrent.status}: ${paneCurrent.stderr.trim()}`);
-  }
-
-  const paneOutput = parseMaybeJson(paneCurrent.stdout);
-  const paneId = parsePaneReference(paneOutput, 'pane current', true).id;
+  const { tabId, paneId } = adapter.createDaemonPane(workspaceId, worktreePath);
   if (!paneId) {
-    throw formatValidationError('herdr pane current output', ['pane current did not include an id']);
+    throw new Error('herdr createDaemonPane did not include a pane id');
   }
+  adapter.runPaneCommand(paneId, daemonCommand);
 
-  const paneRun = runner.run(['pane', 'run', paneId, daemonCommand]);
-  if (paneRun.error) {
-    throw paneRun.error;
-  }
-  if (paneRun.status !== 0) {
-    throw new Error(`herdr pane run failed with exit ${paneRun.status}: ${paneRun.stderr.trim()}`);
-  }
-
-  return {
-    tabId,
-    paneId,
-  };
+  return { tabId, paneId };
 }
 
 export function bootstrap(options: BootstrapOptions): BootstrapResult {
-  const runner = options.runner ?? {
-    run(args: string[]): HerdrCommandResult {
-      const result = spawnSync('herdr', args, {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-
-      if (result.error) {
-        throw result.error;
-      }
-
-      return {
-        stdout: result.stdout ?? '',
-        stderr: result.stderr ?? '',
-        status: result.status,
-      };
-    },
-  };
+  const adapter = resolveHerdrAdapter(options);
 
   const cwd = resolve(options.cwd ?? process.cwd());
   const issue = normalizeIssueReference(options.issue);
   const repository = detectRepositoryInfo(cwd);
   const workflowSource = loadWorkflow(cwd);
   const branchName = issue.number === null ? 'issue-bootstrap' : `issue-${issue.number}-herdr-implement`;
-  const worktree = createWorktreeIfNeeded(runner, repository, branchName, `issue-${issue.number ?? 'bootstrap'}`);
+  const worktree = createWorktreeIfNeeded(adapter, repository, branchName, `issue-${issue.number ?? 'bootstrap'}`);
   const { runStatePath, handleStatePath } = statePathsFor(worktree.worktreePath);
   const existingRunState = loadRunState(runStatePath);
   const existingHandleState = loadHandleState(handleStatePath);
@@ -1769,7 +1640,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     saveHandleState(handleStatePath, handleState);
 
     const { tabId, paneId } = createDaemonPane(
-      runner,
+      adapter,
       existingRunState.workspaceId,
       existingRunState.worktreePath,
       daemonCommand,
@@ -1862,7 +1733,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
 
   saveHandleState(handleStatePath, handleState);
 
-  const { tabId, paneId } = createDaemonPane(runner, worktree.workspaceId, worktree.worktreePath, daemonCommand);
+  const { tabId, paneId } = createDaemonPane(adapter, worktree.workspaceId, worktree.worktreePath, daemonCommand);
   const startedAt = nowIso(options.now);
   runState.updatedAt = startedAt;
   runState.daemon = {
@@ -1925,7 +1796,7 @@ function advanceInitialPhase(state: WorkflowRunState): WorkflowRunState {
 }
 
 function processPendingAgentRun(
-  runner: HerdrCommandRunner,
+  adapter: HerdrAdapter,
   state: WorkflowRunState,
   handleState: DaemonHandleState,
   statePath: string,
@@ -1975,7 +1846,7 @@ function processPendingAgentRun(
     artifact = readResultArtifact(pendingRun.resultPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return rewritePendingArtifact(runner, statePath, state, handleState, pendingRun, phase, message, now);
+    return rewritePendingArtifact(adapter, statePath, state, handleState, pendingRun, phase, message, now);
   }
   if (artifact) {
     try {
@@ -2001,10 +1872,10 @@ function processPendingAgentRun(
           },
         };
         saveRunState(statePath, refreshed);
-        return rewritePendingArtifact(runner, statePath, refreshed, handleState, pendingRun, phase, message, now);
+        return rewritePendingArtifact(adapter, statePath, refreshed, handleState, pendingRun, phase, message, now);
       }
 
-      return rewritePendingArtifact(runner, statePath, state, handleState, pendingRun, phase, message, now);
+      return rewritePendingArtifact(adapter, statePath, state, handleState, pendingRun, phase, message, now);
     }
 
     const acceptedAt = nowIso(now);
@@ -2068,7 +1939,7 @@ function processPendingAgentRun(
     };
   }
 
-  const agentInfo = queryHerdrAgentStatus(runner, agentName);
+  const agentInfo = adapter.getAgentStatus(agentName);
   const updatedAt = nowIso(now);
 
   if (agentInfo.status === 'working') {
@@ -2181,7 +2052,7 @@ function processPendingAgentRun(
       };
     }
 
-    const transcript = readHerdrAgentTranscript(runner, agentName);
+    const transcript = adapter.readAgentTranscript(agentName);
     const refreshed = {
       ...state,
       updatedAt,
@@ -2199,16 +2070,7 @@ function processPendingAgentRun(
       },
     };
     saveRunState(statePath, refreshed);
-    return rewritePendingArtifact(
-      runner,
-      statePath,
-      refreshed,
-      handleState,
-      pendingRun,
-      phase,
-      'agent is idle without a valid result artifact',
-      now,
-    );
+    return rewritePendingArtifact(adapter, statePath, refreshed, handleState, pendingRun, phase, 'agent is idle without a valid result artifact', now);
   }
 
   const refreshed = {
@@ -2231,24 +2093,7 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
   const statePath = options.statePath ? resolve(cwd, options.statePath) : join(cwd, RUN_STATE_PATH);
   const handleStatePath = options.handleStatePath ? resolve(cwd, options.handleStatePath) : join(cwd, HANDLE_STATE_PATH);
   const now = options.now ?? (() => new Date());
-  const runner = options.runner ?? {
-    run(args: string[]): HerdrCommandResult {
-      const result = spawnSync('herdr', args, {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-
-      if (result.error) {
-        throw result.error;
-      }
-
-      return {
-        stdout: result.stdout ?? '',
-        stderr: result.stderr ?? '',
-        status: result.status,
-      };
-    },
-  };
+  const adapter = resolveHerdrAdapter(options);
   const state = loadRunState(statePath);
   const handleState = loadHandleState(handleStatePath);
 
@@ -2293,7 +2138,7 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
   }
 
   if (hasPendingAgentRun(advanced)) {
-    const processed = processPendingAgentRun(runner, advanced, handleState, statePath, now);
+    const processed = processPendingAgentRun(adapter, advanced, handleState, statePath, now);
     return processed.result;
   }
 
@@ -2321,7 +2166,7 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
     };
   }
   if (phase?.type === 'agent') {
-    const dispatched = dispatchAgentPhase(runner, cwd, statePath, handleStatePath, advanced, handleState, currentPhase, now);
+    const dispatched = dispatchAgentPhase(adapter, cwd, statePath, handleStatePath, advanced, handleState, currentPhase, now);
     return dispatched.result;
   }
 

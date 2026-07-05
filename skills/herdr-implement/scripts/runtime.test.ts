@@ -14,6 +14,7 @@ import {
   writeWorkflowRunState,
 } from './runtime.ts';
 import { normalizeWorkflow } from './workflow.ts';
+import type { HerdrAdapter } from './herdr-adapter.ts';
 
 type HerdrCommandResult = {
   stdout: string;
@@ -409,6 +410,50 @@ function createRunner(expectations: Array<{ args: string[]; result: HerdrCommand
   };
 }
 
+function createAdapter(overrides: Partial<HerdrAdapter> = {}): HerdrAdapter {
+  return {
+    ensureWorktree() {
+      return {
+        workspaceId: 'w16',
+        worktreePath: join('/tmp', 'issue-worktree'),
+        branchName: 'issue-16-herdr-implement',
+      };
+    },
+    createDaemonPane() {
+      return {
+        tabId: 'tab-1',
+        paneId: 'pane-1',
+        terminalId: null,
+      };
+    },
+    runPaneCommand() {},
+    launchRoleAgent() {
+      return {
+        tabId: 'tab-impl',
+        paneId: 'pane-impl',
+        terminalId: 'term-impl',
+      };
+    },
+    sendPrompt() {},
+    submitPrompt() {},
+    getAgentStatus() {
+      return {
+        agentName: 'issue-16-implementer',
+        paneId: 'pane-impl',
+        tabId: 'tab-impl',
+        terminalId: 'term-impl',
+        status: 'missing',
+        rawStatus: null,
+        failure: null,
+      };
+    },
+    readAgentTranscript() {
+      return '';
+    },
+    ...overrides,
+  };
+}
+
 async function makeRepo(): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), 'herdr-implement-runtime-'));
   git(dir, ['init', '-b', 'main']);
@@ -686,6 +731,40 @@ test('bootstrap creates worktree-local state and a daemon command that daemon.ts
   assert.equal(daemonCli.status, 0, daemonCli.stderr);
   assert.match(daemonCli.stdout, /"status": "continue"/);
   assert.equal(readWorkflowRunState(result.runStatePath)?.currentPhase, 'ready');
+});
+
+test('bootstrap can be driven through an adapter fake', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeWorktreeFixture(worktreePath);
+
+  const result = bootstrap({
+    cwd: repo,
+    issue: '#16',
+    adapter: createAdapter({
+      ensureWorktree() {
+        return {
+          workspaceId: 'w16',
+          worktreePath,
+          branchName: 'issue-16-herdr-implement',
+        };
+      },
+      createDaemonPane() {
+        return {
+          tabId: 'tab-1',
+          paneId: 'pane-1',
+          terminalId: null,
+        };
+      },
+      runPaneCommand() {},
+    }),
+    now: () => new Date('2026-06-30T12:00:00.000Z'),
+  });
+
+  assert.equal(result.workspaceId, 'w16');
+  assert.equal(result.worktreePath, worktreePath);
+  assert.equal(readWorkflowRunState(result.runStatePath)?.daemon.paneId, 'pane-1');
+  assert.equal(readDaemonHandleState(result.handleStatePath)?.daemonPaneId, 'pane-1');
 });
 
 test('bootstrap recovery reuses existing worktree-local state for the requested issue', async () => {
@@ -1031,6 +1110,49 @@ test('daemon step stops immediately on a terminal phase', async () => {
   assert.equal(result.status, 'stop');
   assert.equal(result.currentPhase, 'done');
   assert.match(result.reason ?? '', /terminal phase/);
+});
+
+test('daemon step uses the adapter for agent status recovery decisions', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeCompletionWorkflowFixture(worktreePath);
+  const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+  const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
+  const pendingRun = pendingCompletionRun(worktreePath);
+  writeWorkflowRunState(runStatePath, {
+    ...completionWorkflowStateFixture(worktreePath, 18),
+    pendingAgentRun: pendingRun,
+  });
+  writeDaemonHandleState(handleStatePath, completionHandleState(worktreePath));
+
+  const result = daemonStep({
+    cwd: worktreePath,
+    statePath: '.agent/herdr-workflow-run.json',
+    handleStatePath: '.agent/herdr-implement.json',
+    adapter: createAdapter({
+      getAgentStatus() {
+        return {
+          agentName: 'issue-18-implementer',
+          paneId: 'pane-impl',
+          tabId: 'tab-impl',
+          terminalId: 'term-impl',
+          status: 'missing',
+          rawStatus: null,
+          failure: {
+            kind: 'command-failed',
+            command: 'agent get issue-18-implementer',
+            exitCode: 1,
+            stderr: 'missing',
+          },
+        };
+      },
+    }),
+    now: () => new Date('2026-06-30T12:34:56.000Z'),
+  });
+
+  assert.equal(result.status, 'continue');
+  assert.equal(result.nextPhase, 'blocked');
+  assert.equal(readWorkflowRunState(runStatePath)?.currentPhase, 'blocked');
 });
 
 test('daemon step lazily starts a role agent and records a pending run', async () => {
