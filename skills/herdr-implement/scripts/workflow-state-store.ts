@@ -6,7 +6,7 @@ import type { NormalizedWorkflow } from './workflow.ts';
 import {
   isRecord,
   optionalFiniteNumber,
-  optionalTrimmedString as optionalString,
+  optionalTrimmedString,
 } from './validation.ts';
 
 export const WORKFLOW_RUN_STATE_PATH = '.agent/herdr-workflow-run.json';
@@ -138,23 +138,23 @@ export function normalizePendingAgentRun(value: unknown): PendingAgentRunState |
     return null;
   }
 
-  const runId = optionalString(value.runId);
-  const phaseId = optionalString(value.phaseId);
-  const roleId = optionalString(value.roleId);
+  const runId = optionalTrimmedString(value.runId);
+  const phaseId = optionalTrimmedString(value.phaseId);
+  const roleId = optionalTrimmedString(value.roleId);
   const completionRole =
     value.completionRole === 'implementer' || value.completionRole === 'reviewer'
       ? value.completionRole
       : roleId
         ? completionRoleFor(roleId)
         : null;
-  const roleLabel = optionalString(value.roleLabel);
-  const agentName = optionalString(value.agentName);
-  const resultSchema = optionalString(value.resultSchema);
-  const resultPath = optionalString(value.resultPath);
-  const notifyTarget = optionalString(value.notifyTarget);
+  const roleLabel = optionalTrimmedString(value.roleLabel);
+  const agentName = optionalTrimmedString(value.agentName);
+  const resultSchema = optionalTrimmedString(value.resultSchema);
+  const resultPath = optionalTrimmedString(value.resultPath);
+  const notifyTarget = optionalTrimmedString(value.notifyTarget);
   const status = value.status === 'pending' ? value.status : null;
   const attemptNumber = optionalFiniteNumber(value.attemptNumber);
-  const startedAt = optionalString(value.startedAt);
+  const startedAt = optionalTrimmedString(value.startedAt);
 
   if (
     !runId ||
@@ -191,18 +191,18 @@ export function normalizeAcceptedAgentRun(value: unknown): AcceptedAgentRunState
     return null;
   }
 
-  const runId = optionalString(value.runId);
-  const phaseId = optionalString(value.phaseId);
-  const roleId = optionalString(value.roleId);
-  const resultPath = optionalString(value.resultPath);
-  const acceptedAt = optionalString(value.acceptedAt);
+  const runId = optionalTrimmedString(value.runId);
+  const phaseId = optionalTrimmedString(value.phaseId);
+  const roleId = optionalTrimmedString(value.roleId);
+  const resultPath = optionalTrimmedString(value.resultPath);
+  const acceptedAt = optionalTrimmedString(value.acceptedAt);
   const status =
     value.status === 'complete' || value.status === 'blocked' || value.status === 'failed' ? value.status : null;
-  const outcome = optionalString(value.outcome);
-  const summary = optionalString(value.summary);
-  const roleLabel = optionalString(value.roleLabel);
-  const agentName = optionalString(value.agentName);
-  const resultSchema = optionalString(value.resultSchema);
+  const outcome = optionalTrimmedString(value.outcome);
+  const summary = optionalTrimmedString(value.summary);
+  const roleLabel = optionalTrimmedString(value.roleLabel);
+  const agentName = optionalTrimmedString(value.agentName);
+  const resultSchema = optionalTrimmedString(value.resultSchema);
   const capture = value.capture === undefined ? null : normalizeCapture(value.capture);
 
   if (!runId || !phaseId || !roleId || !resultPath || !acceptedAt || !status || !outcome) {
@@ -252,13 +252,13 @@ export function normalizeRoleAgentMap(value: unknown): Record<string, RoleAgentS
       continue;
     }
 
-    const roleLabel = optionalString(roleValue.roleLabel);
-    const agentName = optionalString(roleValue.agentName);
-    const tabId = optionalString(roleValue.tabId);
-    const paneId = optionalString(roleValue.paneId);
-    const terminalId = optionalString(roleValue.terminalId);
-    const createdAt = optionalString(roleValue.createdAt);
-    const updatedAt = optionalString(roleValue.updatedAt);
+    const roleLabel = optionalTrimmedString(roleValue.roleLabel);
+    const agentName = optionalTrimmedString(roleValue.agentName);
+    const tabId = optionalTrimmedString(roleValue.tabId);
+    const paneId = optionalTrimmedString(roleValue.paneId);
+    const terminalId = optionalTrimmedString(roleValue.terminalId);
+    const createdAt = optionalTrimmedString(roleValue.createdAt);
+    const updatedAt = optionalTrimmedString(roleValue.updatedAt);
 
     if (!roleLabel || !agentName || !createdAt || !updatedAt) {
       continue;

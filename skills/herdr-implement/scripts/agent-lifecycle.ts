@@ -11,7 +11,7 @@ import {
 import {
   isRecord,
   optionalBoolean,
-  optionalTrimmedString as optionalString,
+  optionalTrimmedString,
 } from './validation.ts';
 import type {
   DaemonHandleState,
@@ -39,7 +39,7 @@ function nowIso(now: () => Date): string {
 }
 
 function requireString(value: unknown, field: string): string {
-  const stringValue = optionalString(value);
+  const stringValue = optionalTrimmedString(value);
   if (!stringValue) {
     throw new Error(`${field} must be a non-empty string`);
   }
@@ -194,7 +194,7 @@ function agentTargetForPendingRun(
     return null;
   }
 
-  const agentNameTemplate = optionalString(role.agentNameTemplate);
+  const agentNameTemplate = optionalTrimmedString(role.agentNameTemplate);
   if (!agentNameTemplate) {
     return null;
   }
@@ -650,7 +650,7 @@ function processPendingAgentRun(
 
   if (agentInfo.status === 'idle' || agentInfo.status === 'unknown') {
     const existingIdleRecovery = isRecord(state.context.idleAgentRecovery) ? state.context.idleAgentRecovery : null;
-    if (optionalString(existingIdleRecovery?.runId) === pendingRun.runId) {
+    if (optionalTrimmedString(existingIdleRecovery?.runId) === pendingRun.runId) {
       const blockedPhase = resolveNextPhase(state.workflow, pendingRun.phaseId, 'blocked');
       const refreshed = {
         ...state,
@@ -738,7 +738,7 @@ function dispatchAgentPhase(
     completionRoleFor(roleId),
     requireString(role.label, `roles.${roleId}.label`),
     agentName,
-    optionalString(phase.resultSchema),
+    optionalTrimmedString(phase.resultSchema),
     attemptNumber,
     startedAt,
   );

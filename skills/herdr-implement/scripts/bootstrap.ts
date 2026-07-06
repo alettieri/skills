@@ -21,11 +21,12 @@ function parseIssue(argv: string[]): string {
 }
 
 function requireIssue(value: string | undefined): string {
-  if (!optionalTrimmedString(value)) {
+  const issue = optionalTrimmedString(value);
+  if (!issue) {
     throw new Error('missing required option --issue');
   }
 
-  return value as string;
+  return issue;
 }
 
 function printHelp(): void {
