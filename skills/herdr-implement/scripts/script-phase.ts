@@ -10,6 +10,7 @@ import {
   optionalFiniteNumber,
   optionalTrimmedString,
 } from './validation.ts';
+import { renderTemplate } from './text-template.ts';
 
 export type IssueReference = {
   input: string;
@@ -297,10 +298,6 @@ function flattenContextValues(context: Record<string, unknown>, prefix = 'contex
   }
 
   return values;
-}
-
-function renderTemplate(source: string, values: Record<string, string>): string {
-  return source.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_match, key: string) => values[key] ?? '');
 }
 
 function renderScriptTemplate(source: string, state: ScriptPhaseWorkflowState, phaseId: string): string {

@@ -13,6 +13,7 @@ import {
   optionalBoolean,
   optionalTrimmedString,
 } from './validation.ts';
+import { renderTemplate } from './text-template.ts';
 import type {
   DaemonHandleState,
   PendingAgentRunState,
@@ -44,10 +45,6 @@ function requireString(value: unknown, field: string): string {
     throw new Error(`${field} must be a non-empty string`);
   }
   return stringValue;
-}
-
-function renderTemplate(source: string, values: Record<string, string>): string {
-  return source.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_match, key: string) => values[key] ?? '');
 }
 
 function readPromptTemplate(cwd: string, workflowPath: string, templateName: string): string {
