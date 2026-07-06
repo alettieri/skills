@@ -826,6 +826,8 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
   const currentPhase = advanced.currentPhase;
   const phase = advanced.workflow.phases[currentPhase];
   if (advanced.pendingAgentRun !== null || phase?.type === 'agent') {
+    // Agent dispatch/recovery lives in the lifecycle module; runtime only
+    // hands off the current state and persists the returned snapshot.
     const advancedAgent = advanceAgentWorkOnce({
       cwd,
       state: advanced,

@@ -132,6 +132,8 @@ function parseAgentRunAttemptNumber(runId: string): number | null {
 function nextAgentAttemptNumber(state: WorkflowRunState, phaseId: string, roleId: string): number {
   let highestAttempt = 0;
 
+  // Reuse the same phase/role identity, but always move forward from any
+  // accepted or still-pending visit so a looped workflow gets a fresh run id.
   for (const run of Object.values(state.acceptedAgentRuns)) {
     if (run.phaseId !== phaseId || run.roleId !== roleId) {
       continue;
@@ -501,6 +503,8 @@ function rewritePendingArtifact(
   reason: string,
   now: () => Date,
 ): { handleState: DaemonHandleState; state: WorkflowRunState; result: DaemonStepResult } {
+  // Rewrite requests are best-effort: if we cannot target the same agent, we
+  // still persist the failure context and stop cleanly.
   const agentName = agentTargetForPendingRun(state, handleState, pendingRun);
   if (!agentName) {
     const updatedAt = nowIso(now);
@@ -619,6 +623,8 @@ function processPendingAgentRun(
     throw new Error(`phase ${pendingRun.phaseId} is not an agent phase`);
   }
 
+  // A pending run that already landed in acceptedAgentRuns is a duplicate
+  // notification for a visit we have already recorded; keep routing stable.
   if (state.acceptedAgentRuns[pendingRun.runId]) {
     const updatedAt = nowIso(now);
     const acceptedRun = state.acceptedAgentRuns[pendingRun.runId];
@@ -901,6 +907,8 @@ function dispatchAgentPhase(
   const attemptNumber = nextAgentAttemptNumber(state, phaseId, roleId);
   const startedAt = nowIso(now);
   const baseAgentName = renderAgentName(requireString(role.agentNameTemplate, `roles.${roleId}.agentNameTemplate`), state, roleId);
+  // Each loop through the same phase/role gets a distinct run id so a later
+  // revisit can be distinguished from any earlier accepted completion.
   const runId = buildAgentRunId(state, `${phaseId}-${roleId}`, attemptNumber);
   const agentName = reuseRole ? baseAgentName : `${baseAgentName}-${runId}`;
   const pendingRun = createPendingAgentRun(

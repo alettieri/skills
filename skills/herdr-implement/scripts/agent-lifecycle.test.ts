@@ -185,6 +185,8 @@ test('advanceAgentWorkOnce uses a fresh attempt number when revisiting the same 
   await mkdir(join(worktreePath, '.agent/runs', secondRunId), { recursive: true });
 
   const calls: Array<{ type: string; args: unknown[] }> = [];
+  // Pretend the first visit already completed so the second visit must move
+  // forward to a new run id instead of reusing the accepted one.
   const firstResult = invoke({
     cwd: worktreePath,
     state: {
