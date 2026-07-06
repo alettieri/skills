@@ -1,22 +1,32 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { loadWorkflow } from './workflow.ts';
-import type { NormalizedPhase, NormalizedWorkflow } from './workflow.ts';
+import type { NormalizedWorkflow } from './workflow.ts';
 import { createHerdrAdapter, type HerdrAdapter } from './herdr-adapter.ts';
-import { mergeCaptureIntoContext, normalizeCapture } from './capture.ts';
-import {
-  executeScriptPhase,
-  normalizeScriptRunMap,
-  recoverCompletedScriptPhase,
-  type ScriptRunState,
-} from './script-phase.ts';
+import { mergeCaptureIntoContext } from './capture.ts';
+import { executeScriptPhase, recoverCompletedScriptPhase } from './script-phase.ts';
 import { advanceAgentWorkOnce } from './agent-lifecycle.ts';
+import {
+  DAEMON_HANDLE_STATE_PATH,
+  WORKFLOW_RUN_STATE_PATH,
+  readDaemonHandleState,
+  readWorkflowRunState,
+  workflowStatePathsFor,
+  writeDaemonHandleState,
+  writeWorkflowRunState,
+  type AcceptedAgentRunState,
+  type DaemonHandleState,
+  type IssueReference,
+  type PendingAgentRunState,
+  type RepositoryInfo,
+  type RoleAgentState,
+  type WorkflowRunState,
+} from './workflow-state-store.ts';
 
-export const RUN_STATE_PATH = '.agent/herdr-workflow-run.json';
-export const HANDLE_STATE_PATH = '.agent/herdr-implement.json';
+export const RUN_STATE_PATH = WORKFLOW_RUN_STATE_PATH;
+export const HANDLE_STATE_PATH = DAEMON_HANDLE_STATE_PATH;
 export const DEFAULT_DAEMON_LABEL = 'herdr-implement-daemon';
 
 export type HerdrCommandResult = {
@@ -30,104 +40,13 @@ export type HerdrCommandRunner = {
   run(args: string[]): HerdrCommandResult;
 };
 
-export type IssueReference = {
-  input: string;
-  number: number | null;
-  url: string | null;
-  canonical: string;
-};
-
-export type RepositoryInfo = {
-  rootPath: string;
-  remoteUrl: string | null;
-  currentBranch: string;
-  baseBranch: string;
-};
-
 export type WorktreeInfo = {
   workspaceId: string;
   worktreePath: string;
   branchName: string;
 };
 
-export type PendingAgentRunState = {
-  runId: string;
-  phaseId: string;
-  roleId: string;
-  completionRole: 'implementer' | 'reviewer';
-  roleLabel: string | null;
-  agentName: string | null;
-  resultSchema: string | null;
-  resultPath: string;
-  notifyTarget: string;
-  attemptNumber: number;
-  startedAt: string;
-  status: 'pending';
-};
-
-export type AcceptedAgentRunState = {
-  runId: string;
-  phaseId: string;
-  roleId: string;
-  roleLabel: string | null;
-  agentName: string | null;
-  resultSchema: string | null;
-  resultPath: string;
-  acceptedAt: string;
-  status: 'complete' | 'blocked' | 'failed';
-  outcome: string;
-  summary: string | null;
-  capture: Record<string, unknown> | null;
-};
-
-export type RoleAgentState = {
-  roleId: string;
-  roleLabel: string;
-  agentName: string;
-  tabId: string | null;
-  paneId: string | null;
-  terminalId: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type DaemonHandleState = {
-  schemaVersion: 1;
-  runStatePath: string;
-  workspaceId: string;
-  worktreePath: string;
-  daemonTabId: string | null;
-  daemonPaneId: string | null;
-  daemonCommand: string | null;
-  roleAgents: Record<string, RoleAgentState>;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type WorkflowRunState = {
-  schemaVersion: 1;
-  issue: IssueReference;
-  workflowPath: string;
-  workflow: NormalizedWorkflow;
-  sourceRepo: RepositoryInfo;
-  branchName: string;
-  worktreePath: string;
-  workspaceId: string;
-  currentPhase: string;
-  context: Record<string, unknown>;
-  pendingAgentRun: PendingAgentRunState | null;
-  acceptedAgentRuns: Record<string, AcceptedAgentRunState>;
-  scriptRuns: Record<string, ScriptRunState>;
-  createdAt: string;
-  updatedAt: string;
-  daemonHandlePath: string;
-  daemon: {
-    tabId: string | null;
-    paneId: string | null;
-    command: string | null;
-    startedAt: string | null;
-  };
-};
+export type { AcceptedAgentRunState, DaemonHandleState, IssueReference, PendingAgentRunState, RepositoryInfo, RoleAgentState, WorkflowRunState } from './workflow-state-store.ts';
 
 export type BootstrapOptions = {
   cwd?: string;
@@ -190,27 +109,6 @@ function nowIso(now?: () => Date): string {
   return (now?.() ?? new Date()).toISOString();
 }
 
-function ensureDir(path: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-}
-
-function readJsonFile(path: string): unknown | null {
-  if (!existsSync(path)) {
-    return null;
-  }
-
-  return JSON.parse(readFileSync(path, 'utf8')) as unknown;
-}
-
-function writeJsonFile(path: string, value: unknown): void {
-  ensureDir(path);
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function optionalString(value: unknown): string | null {
   if (typeof value === 'string' && value.trim() !== '') {
     return value.trim();
@@ -224,17 +122,6 @@ function requireString(value: unknown, field: string): string {
     throw new Error(`${field} must be a non-empty string`);
   }
   return stringValue;
-}
-
-function optionalBoolean(value: unknown): boolean | null {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-  return null;
-}
-
-function completionRoleFor(roleId: string): 'implementer' | 'reviewer' {
-  return roleId === 'reviewer' ? 'reviewer' : 'implementer';
 }
 
 function runGit(args: string[], cwd: string): string {
@@ -312,203 +199,6 @@ function ensureDaemonCommand(worktreePath: string): string {
   return `node skills/herdr-implement/scripts/daemon.ts --worktree ${JSON.stringify(worktreePath)} --state ${RUN_STATE_PATH} --handles ${HANDLE_STATE_PATH}`;
 }
 
-function statePathsFor(worktreePath: string): { runStatePath: string; handleStatePath: string } {
-  return {
-    runStatePath: join(worktreePath, RUN_STATE_PATH),
-    handleStatePath: join(worktreePath, HANDLE_STATE_PATH),
-  };
-}
-
-function loadRunState(path: string): WorkflowRunState | null {
-  const value = readJsonFile(path);
-  if (!value) {
-    return null;
-  }
-  if (!isRecord(value) || value.schemaVersion !== 1) {
-    throw new Error(`invalid workflow run state at ${path}`);
-  }
-  return normalizeWorkflowRunState(value as Record<string, unknown>);
-}
-
-function loadHandleState(path: string): DaemonHandleState | null {
-  const value = readJsonFile(path);
-  if (!value) {
-    return null;
-  }
-  if (!isRecord(value) || value.schemaVersion !== 1) {
-    throw new Error(`invalid daemon handle state at ${path}`);
-  }
-  return {
-    ...(value as DaemonHandleState),
-    roleAgents: normalizeRoleAgentMap(value.roleAgents),
-  };
-}
-
-function saveRunState(path: string, state: WorkflowRunState): void {
-  writeJsonFile(path, state);
-}
-
-function saveHandleState(path: string, state: DaemonHandleState): void {
-  writeJsonFile(path, state);
-}
-
-function normalizePendingAgentRun(value: unknown): PendingAgentRunState | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const runId = optionalString(value.runId);
-  const phaseId = optionalString(value.phaseId);
-  const roleId = optionalString(value.roleId);
-  const completionRole =
-    value.completionRole === 'implementer' || value.completionRole === 'reviewer'
-      ? value.completionRole
-      : roleId
-        ? completionRoleFor(roleId)
-        : null;
-  const roleLabel = optionalString(value.roleLabel);
-  const agentName = optionalString(value.agentName);
-  const resultSchema = optionalString(value.resultSchema);
-  const resultPath = optionalString(value.resultPath);
-  const notifyTarget = optionalString(value.notifyTarget);
-  const status = value.status === 'pending' ? value.status : null;
-  const attemptNumber = typeof value.attemptNumber === 'number' && Number.isFinite(value.attemptNumber) ? value.attemptNumber : null;
-  const startedAt = optionalString(value.startedAt);
-
-  if (
-    !runId ||
-    !phaseId ||
-    !roleId ||
-    !completionRole ||
-    !resultPath ||
-    !notifyTarget ||
-    !status ||
-    attemptNumber === null ||
-    !startedAt
-  ) {
-    return null;
-  }
-
-  return {
-    runId,
-    phaseId,
-    roleId,
-    completionRole,
-    roleLabel,
-    agentName,
-    resultSchema,
-    resultPath,
-    notifyTarget,
-    attemptNumber,
-    startedAt,
-    status,
-  };
-}
-
-function normalizeAcceptedAgentRun(value: unknown): AcceptedAgentRunState | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const runId = optionalString(value.runId);
-  const phaseId = optionalString(value.phaseId);
-  const roleId = optionalString(value.roleId);
-  const resultPath = optionalString(value.resultPath);
-  const acceptedAt = optionalString(value.acceptedAt);
-  const status =
-    value.status === 'complete' || value.status === 'blocked' || value.status === 'failed' ? value.status : null;
-  const outcome = optionalString(value.outcome);
-  const summary = optionalString(value.summary);
-  const roleLabel = optionalString(value.roleLabel);
-  const agentName = optionalString(value.agentName);
-  const resultSchema = optionalString(value.resultSchema);
-  const capture = value.capture === undefined ? null : normalizeCapture(value.capture);
-
-  if (!runId || !phaseId || !roleId || !resultPath || !acceptedAt || !status || !outcome) {
-    return null;
-  }
-
-  return {
-    runId,
-    phaseId,
-    roleId,
-    roleLabel,
-    agentName,
-    resultSchema,
-    resultPath,
-    acceptedAt,
-    status,
-    outcome,
-    summary,
-    capture,
-  };
-}
-
-function normalizeAcceptedAgentRunMap(value: unknown): Record<string, AcceptedAgentRunState> {
-  if (!isRecord(value)) {
-    return {};
-  }
-
-  const result: Record<string, AcceptedAgentRunState> = {};
-  for (const [runId, runValue] of Object.entries(value)) {
-    const normalized = normalizeAcceptedAgentRun(runValue);
-    if (normalized) {
-      result[runId] = normalized;
-    }
-  }
-
-  return result;
-}
-
-function normalizeWorkflowRunState(value: Record<string, unknown>): WorkflowRunState {
-  const context = isRecord(value.context) ? { ...value.context } : {};
-  return {
-    ...(value as WorkflowRunState),
-    pendingAgentRun: normalizePendingAgentRun(value.pendingAgentRun),
-    acceptedAgentRuns: normalizeAcceptedAgentRunMap(value.acceptedAgentRuns),
-    scriptRuns: normalizeScriptRunMap(value.scriptRuns),
-    context,
-  };
-}
-
-function normalizeRoleAgentMap(value: unknown): Record<string, RoleAgentState> {
-  if (!isRecord(value)) {
-    return {};
-  }
-
-  const result: Record<string, RoleAgentState> = {};
-  for (const [roleId, roleValue] of Object.entries(value)) {
-    if (!isRecord(roleValue)) {
-      continue;
-    }
-
-    const roleLabel = optionalString(roleValue.roleLabel);
-    const agentName = optionalString(roleValue.agentName);
-    const tabId = optionalString(roleValue.tabId);
-    const paneId = optionalString(roleValue.paneId);
-    const terminalId = optionalString(roleValue.terminalId);
-    const createdAt = optionalString(roleValue.createdAt);
-    const updatedAt = optionalString(roleValue.updatedAt);
-
-    if (!roleLabel || !agentName || !createdAt || !updatedAt) {
-      continue;
-    }
-
-    result[roleId] = {
-      roleId,
-      roleLabel,
-      agentName,
-      tabId,
-      paneId,
-      terminalId,
-      createdAt,
-      updatedAt,
-    };
-  }
-
-  return result;
-}
-
 function createWorktreeIfNeeded(
   adapter: HerdrAdapter,
   repository: RepositoryInfo,
@@ -542,9 +232,9 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
   const workflowSource = loadWorkflow(cwd);
   const branchName = issue.number === null ? 'issue-bootstrap' : `issue-${issue.number}-herdr-implement`;
   const worktree = createWorktreeIfNeeded(adapter, repository, branchName, `issue-${issue.number ?? 'bootstrap'}`);
-  const { runStatePath, handleStatePath } = statePathsFor(worktree.worktreePath);
-  const existingRunState = loadRunState(runStatePath);
-  const existingHandleState = loadHandleState(handleStatePath);
+  const { runStatePath, handleStatePath } = workflowStatePathsFor(worktree.worktreePath);
+  const existingRunState = readWorkflowRunState(runStatePath);
+  const existingHandleState = readDaemonHandleState(handleStatePath);
 
   if (existingRunState && existingRunState.issue.canonical !== issue.canonical) {
     throw new Error(
@@ -588,7 +278,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
       updatedAt: existingRunState.updatedAt,
     };
 
-    saveHandleState(handleStatePath, handleState);
+    writeDaemonHandleState(handleStatePath, handleState);
 
     const { tabId, paneId } = createDaemonPane(
       adapter,
@@ -607,7 +297,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
         startedAt,
       },
     };
-    saveRunState(runStatePath, updatedRunState);
+    writeWorkflowRunState(runStatePath, updatedRunState);
 
     const updatedHandleState: DaemonHandleState = {
       ...handleState,
@@ -616,7 +306,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
       daemonCommand,
       updatedAt: startedAt,
     };
-    saveHandleState(handleStatePath, updatedHandleState);
+    writeDaemonHandleState(handleStatePath, updatedHandleState);
 
     return {
       issue,
@@ -667,7 +357,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     },
   };
 
-  saveRunState(runStatePath, runState);
+  writeWorkflowRunState(runStatePath, runState);
 
   const handleState: DaemonHandleState = {
     schemaVersion: 1,
@@ -682,7 +372,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     updatedAt: createdAt,
   };
 
-  saveHandleState(handleStatePath, handleState);
+  writeDaemonHandleState(handleStatePath, handleState);
 
   const { tabId, paneId } = createDaemonPane(adapter, worktree.workspaceId, worktree.worktreePath, daemonCommand);
   const startedAt = nowIso(options.now);
@@ -693,12 +383,12 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     command: daemonCommand,
     startedAt,
   };
-  saveRunState(runStatePath, runState);
+  writeWorkflowRunState(runStatePath, runState);
 
   handleState.daemonTabId = tabId;
   handleState.daemonPaneId = paneId;
   handleState.updatedAt = startedAt;
-  saveHandleState(handleStatePath, handleState);
+  writeDaemonHandleState(handleStatePath, handleState);
 
   return {
     issue,
@@ -752,8 +442,8 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
   const handleStatePath = options.handleStatePath ? resolve(cwd, options.handleStatePath) : join(cwd, HANDLE_STATE_PATH);
   const now = options.now ?? (() => new Date());
   const adapter = resolveHerdrAdapter(options);
-  const state = loadRunState(statePath);
-  const handleState = loadHandleState(handleStatePath);
+  const state = readWorkflowRunState(statePath);
+  const handleState = readDaemonHandleState(handleStatePath);
 
   if (!state) {
     throw new Error(`workflow run state does not exist: ${statePath}`);
@@ -765,7 +455,7 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
 
   if (isTerminalPhase(state.workflow, state.currentPhase)) {
     const updatedAt = nowIso(now);
-    saveRunState(statePath, { ...state, updatedAt });
+    writeWorkflowRunState(statePath, { ...state, updatedAt });
     return {
       status: 'stop',
       currentPhase: state.currentPhase,
@@ -775,7 +465,7 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
 
   const advanced = advanceInitialPhase(state);
   if (advanced !== state) {
-    saveRunState(statePath, advanced);
+    writeWorkflowRunState(statePath, advanced);
     return {
       status: 'continue',
       currentPhase: state.currentPhase,
@@ -786,7 +476,7 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
 
   const recoveredScriptState = recoverCompletedScriptPhase(advanced);
   if (recoveredScriptState) {
-    saveRunState(statePath, recoveredScriptState.state);
+    writeWorkflowRunState(statePath, recoveredScriptState.state);
     return {
       status: recoveredScriptState.nextPhase ? 'continue' : 'stop',
       currentPhase: advanced.currentPhase,
@@ -807,8 +497,8 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
       adapter,
       now,
     });
-    saveRunState(statePath, advancedAgent.state);
-    saveHandleState(handleStatePath, advancedAgent.handleState);
+    writeWorkflowRunState(statePath, advancedAgent.state);
+    writeDaemonHandleState(handleStatePath, advancedAgent.handleState);
     return advancedAgent.result;
   }
 
@@ -825,7 +515,7 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
       updatedAt,
       context: mergeCaptureIntoContext(advanced.context, executed.record.capture),
     };
-    saveRunState(statePath, updatedState);
+    writeWorkflowRunState(statePath, updatedState);
     return {
       status: executed.nextPhase ? 'continue' : 'stop',
       currentPhase,
@@ -838,7 +528,7 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
     ...advanced,
     updatedAt: nowIso(now),
   };
-  saveRunState(statePath, refreshed);
+  writeWorkflowRunState(statePath, refreshed);
 
   return {
     status: 'sleep',
@@ -901,18 +591,4 @@ export function createFakeRunner(responses: Array<{ args: string[]; result: Herd
   };
 }
 
-export function writeWorkflowRunState(path: string, state: WorkflowRunState): void {
-  saveRunState(path, state);
-}
-
-export function writeDaemonHandleState(path: string, state: DaemonHandleState): void {
-  saveHandleState(path, state);
-}
-
-export function readWorkflowRunState(path: string): WorkflowRunState | null {
-  return loadRunState(path);
-}
-
-export function readDaemonHandleState(path: string): DaemonHandleState | null {
-  return loadHandleState(path);
-}
+export { readDaemonHandleState, readWorkflowRunState, writeDaemonHandleState, writeWorkflowRunState };

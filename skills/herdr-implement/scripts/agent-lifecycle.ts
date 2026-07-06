@@ -1,13 +1,19 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import type { DaemonHandleState, DaemonStepResult, PendingAgentRunState, RoleAgentState, WorkflowRunState } from './runtime.ts';
 import type { HerdrAdapter } from './herdr-adapter.ts';
 import type { NormalizedPhase, NormalizedWorkflow } from './workflow.ts';
+import type { DaemonStepResult } from './runtime.ts';
 import {
   applyAcceptedResultArtifact,
   createAcceptedResultArtifactSummary,
   evaluateResultArtifact,
 } from './result-artifact.ts';
+import type {
+  DaemonHandleState,
+  PendingAgentRunState,
+  RoleAgentState,
+  WorkflowRunState,
+} from './workflow-state-store.ts';
 
 export type AgentLifecycleOptions = {
   cwd: string;
