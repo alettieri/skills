@@ -3,9 +3,9 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { loadWorkflow } from './workflow.ts';
-import type { NormalizedWorkflow } from './workflow.ts';
 import { createHerdrAdapter, type HerdrAdapter } from './herdr-adapter.ts';
 import { mergeCaptureIntoContext } from './capture.ts';
+import { isTerminalPhase, resolveNextPhase } from './workflow-transition.ts';
 import { executeScriptPhase, recoverCompletedScriptPhase } from './script-phase.ts';
 import { advanceAgentWorkOnce } from './agent-lifecycle.ts';
 import { optionalTrimmedString } from './validation.ts';
@@ -390,20 +390,6 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     createdRunState: true,
     createdHandleState: true,
   };
-}
-
-function isTerminalPhase(workflow: NormalizedWorkflow, phaseName: string): boolean {
-  const phase = workflow.phases[phaseName];
-  return phase?.type === 'terminal';
-}
-
-function resolveNextPhase(workflow: NormalizedWorkflow, phaseName: string, outcome: string): string | null {
-  const phase = workflow.phases[phaseName];
-  if (!phase) {
-    return null;
-  }
-
-  return phase.on[outcome] ?? null;
 }
 
 function advanceInitialPhase(state: WorkflowRunState): WorkflowRunState {

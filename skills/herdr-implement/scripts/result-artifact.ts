@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { mergeCaptureIntoContext, normalizeCapture } from './capture.ts';
 import type { NormalizedPhase } from './workflow.ts';
+import { resolveNextPhase } from './workflow-transition.ts';
 import type { PendingAgentRunState, WorkflowRunState } from './workflow-state-store.ts';
 import { isRecord, optionalTrimmedString } from './validation.ts';
 
@@ -168,15 +169,6 @@ export function evaluateResultArtifact(options: {
   }
 
   return classification;
-}
-
-function resolveNextPhase(workflow: WorkflowRunState['workflow'], phaseName: string, outcome: string): string | null {
-  const phase = workflow.phases[phaseName];
-  if (!phase) {
-    return null;
-  }
-
-  return phase.on[outcome] ?? null;
 }
 
 export function applyAcceptedResultArtifact(

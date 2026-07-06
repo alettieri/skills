@@ -1,13 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { HerdrAdapter } from './herdr-adapter.ts';
-import type { NormalizedPhase, NormalizedWorkflow } from './workflow.ts';
+import type { NormalizedPhase } from './workflow.ts';
 import type { DaemonStepResult } from './runtime.ts';
 import {
   applyAcceptedResultArtifact,
   createAcceptedResultArtifactSummary,
   evaluateResultArtifact,
 } from './result-artifact.ts';
+import { resolveNextPhase } from './workflow-transition.ts';
 import {
   isRecord,
   optionalBoolean,
@@ -780,15 +781,6 @@ function dispatchAgentPhase(
       reason: `waiting for agent run ${pendingRun.runId}`,
     },
   };
-}
-
-function resolveNextPhase(workflow: NormalizedWorkflow, phaseName: string, outcome: string): string | null {
-  const phase = workflow.phases[phaseName];
-  if (!phase) {
-    return null;
-  }
-
-  return phase.on[outcome] ?? null;
 }
 
 export function advanceAgentWorkOnce(options: AgentLifecycleOptions): AgentLifecycleResult {
