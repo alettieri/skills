@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { NormalizedPhase, NormalizedWorkflow } from './workflow.ts';
 import { normalizeCapture } from './capture.ts';
+import { resolveNextPhase } from './workflow-transition.ts';
 import {
   isRecord,
   optionalBoolean,
@@ -875,13 +876,4 @@ export function recoverCompletedScriptPhase<T extends ScriptPhaseWorkflowState>(
     } as T,
     nextPhase,
   };
-}
-
-function resolveNextPhase(workflow: NormalizedWorkflow, phaseId: string, outcome: string): string | null {
-  const phase = workflow.phases[phaseId];
-  if (!phase) {
-    return null;
-  }
-
-  return phase.on[outcome] ?? null;
 }
