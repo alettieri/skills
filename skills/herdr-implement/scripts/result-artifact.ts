@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
-import type { PendingAgentRunState, WorkflowRunState } from './runtime.ts';
 import { mergeCaptureIntoContext, normalizeCapture } from './capture.ts';
 import type { NormalizedPhase } from './workflow.ts';
+import type { PendingAgentRunState, WorkflowRunState } from './workflow-state-store.ts';
 
 export type ResultArtifact = {
   schemaVersion: number;
