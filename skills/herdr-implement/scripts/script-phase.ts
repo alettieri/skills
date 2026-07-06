@@ -4,6 +4,12 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { NormalizedPhase, NormalizedWorkflow } from './workflow.ts';
 import { normalizeCapture } from './capture.ts';
+import {
+  isRecord,
+  optionalBoolean,
+  optionalFiniteNumber,
+  optionalTrimmedString,
+} from './validation.ts';
 
 export type IssueReference = {
   input: string;
@@ -90,34 +96,16 @@ export type ScriptPhaseWorkflowState = {
   scriptRuns: Record<string, ScriptRunState>;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function ensureDir(path: string): void {
   mkdirSync(dirname(path), { recursive: true });
 }
 
-function optionalString(value: unknown): string | null {
-  if (typeof value === 'string' && value.trim() !== '') {
-    return value.trim();
-  }
-  return null;
-}
-
 function requireString(value: unknown, field: string): string {
-  const stringValue = optionalString(value);
+  const stringValue = optionalTrimmedString(value);
   if (!stringValue) {
     throw new Error(`${field} must be a non-empty string`);
   }
   return stringValue;
-}
-
-function optionalBoolean(value: unknown): boolean | null {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-  return null;
 }
 
 function normalizeStringRecord(value: unknown): Record<string, string> | null {
@@ -141,36 +129,38 @@ export function normalizeScriptRun(value: unknown): ScriptRunState | null {
     return null;
   }
 
-  const phaseId = optionalString(value.phaseId);
-  const runId = optionalString(value.runId);
-  const command = optionalString(value.command);
-  const resolvedCommandPath = optionalString(value.resolvedCommandPath);
+  const phaseId = optionalTrimmedString(value.phaseId);
+  const runId = optionalTrimmedString(value.runId);
+  const command = optionalTrimmedString(value.command);
+  const resolvedCommandPath = optionalTrimmedString(value.resolvedCommandPath);
   const args = Array.isArray(value.args) && value.args.every((item) => typeof item === 'string') ? value.args : null;
-  const cwd = optionalString(value.cwd);
+  const cwd = optionalTrimmedString(value.cwd);
   const env = normalizeStringRecord(value.env);
-  const timeoutSeconds = typeof value.timeoutSeconds === 'number' && Number.isFinite(value.timeoutSeconds) ? value.timeoutSeconds : null;
-  const startedAt = optionalString(value.startedAt);
-  const finishedAt = optionalString(value.finishedAt);
-  const durationMs = typeof value.durationMs === 'number' && Number.isFinite(value.durationMs) ? value.durationMs : null;
+  const timeoutSeconds = optionalFiniteNumber(value.timeoutSeconds);
+  const startedAt = optionalTrimmedString(value.startedAt);
+  const finishedAt = optionalTrimmedString(value.finishedAt);
+  const durationMs = optionalFiniteNumber(value.durationMs);
   const timedOut = optionalBoolean(value.timedOut);
   const exitCode =
-    typeof value.exitCode === 'number' && Number.isFinite(value.exitCode)
-      ? value.exitCode
+    value.exitCode === undefined
+      ? undefined
       : value.exitCode === null
         ? null
-        : undefined;
-  const signal = value.signal === null ? null : optionalString(value.signal);
+        : typeof value.exitCode === 'number' && Number.isFinite(value.exitCode)
+          ? value.exitCode
+          : undefined;
+  const signal = value.signal === null ? null : optionalTrimmedString(value.signal);
   const status =
     value.status === 'complete' || value.status === 'blocked' || value.status === 'failed' || value.status === 'timeout'
       ? value.status
       : null;
-  const outcome = optionalString(value.outcome);
+  const outcome = optionalTrimmedString(value.outcome);
   const capture = value.capture === undefined ? null : normalizeCapture(value.capture);
   const stdout = typeof value.stdout === 'string' ? value.stdout : null;
   const stderr = typeof value.stderr === 'string' ? value.stderr : null;
-  const stdoutPath = optionalString(value.stdoutPath);
-  const stderrPath = optionalString(value.stderrPath);
-  const rawOutputPath = optionalString(value.rawOutputPath);
+  const stdoutPath = optionalTrimmedString(value.stdoutPath);
+  const stderrPath = optionalTrimmedString(value.stderrPath);
+  const rawOutputPath = optionalTrimmedString(value.rawOutputPath);
   const retryable = optionalBoolean(value.retryable);
 
   if (
@@ -366,8 +356,8 @@ function renderScriptEnv(state: ScriptPhaseWorkflowState, phaseId: string, env: 
 }
 
 function scriptPhaseTimeoutSeconds(phase: NormalizedPhase): number {
-  const timeoutSeconds = phase.timeoutSeconds;
-  if (typeof timeoutSeconds === 'number' && Number.isFinite(timeoutSeconds) && timeoutSeconds > 0) {
+  const timeoutSeconds = optionalFiniteNumber(phase.timeoutSeconds);
+  if (timeoutSeconds !== null && timeoutSeconds > 0) {
     return timeoutSeconds;
   }
 
@@ -497,7 +487,7 @@ function parseScriptOutcome(stdout: string): { outcome: string; capture: Record<
       throw new Error('script stdout JSON outcome must be an object');
     }
 
-    const outcome = optionalString(parsed.outcome);
+    const outcome = optionalTrimmedString(parsed.outcome);
     if (!outcome) {
       throw new Error('script stdout JSON outcome must include a non-empty outcome');
     }
@@ -748,22 +738,20 @@ export function executeScriptPhase(
     return { record, nextPhase: resolveNextPhase(state.workflow, phaseId, 'failure') };
   }
 
-  const helperStartedAt = optionalString(helperResultRecord.startedAt) ?? startedAt;
-  const helperFinishedAt = optionalString(helperResultRecord.finishedAt) ?? finishedAt;
-  const helperDurationMs =
-    typeof helperResultRecord.durationMs === 'number' && Number.isFinite(helperResultRecord.durationMs)
-      ? helperResultRecord.durationMs
-      : durationMs;
+  const helperStartedAt = optionalTrimmedString(helperResultRecord.startedAt) ?? startedAt;
+  const helperFinishedAt = optionalTrimmedString(helperResultRecord.finishedAt) ?? finishedAt;
+  const helperDurationMs = optionalFiniteNumber(helperResultRecord.durationMs) ?? durationMs;
   const stdout = typeof helperResultRecord.stdout === 'string' ? helperResultRecord.stdout : '';
   const stderr = typeof helperResultRecord.stderr === 'string' ? helperResultRecord.stderr : '';
-  const exitCode = typeof helperResultRecord.exitCode === 'number' && Number.isFinite(helperResultRecord.exitCode)
-    ? helperResultRecord.exitCode
-    : null;
+  const exitCode =
+    typeof helperResultRecord.exitCode === 'number' && Number.isFinite(helperResultRecord.exitCode)
+      ? helperResultRecord.exitCode
+      : null;
   const timedOut = helperResultRecord.timedOut === true;
-  const signal = optionalString(helperResultRecord.signal);
+  const signal = optionalTrimmedString(helperResultRecord.signal);
 
   if (helperKind === 'error') {
-    const message = optionalString(helperResultRecord.errorMessage) ?? 'script phase helper reported an error';
+    const message = optionalTrimmedString(helperResultRecord.errorMessage) ?? 'script phase helper reported an error';
     const record = createScriptFailureRecord({
       phaseId,
       runId,

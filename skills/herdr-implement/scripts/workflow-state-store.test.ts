@@ -217,6 +217,75 @@ test('readWorkflowRunState normalizes compatibility fields, context defaults, an
   assert.equal(state?.scriptRuns.setup.capture?.greeting, 'hello');
 });
 
+test('readWorkflowRunState rejects persisted script runs with invalid non-null exit codes', () => {
+  const worktreePath = tempWorktree();
+  const runStatePath = join(worktreePath, WORKFLOW_RUN_STATE_PATH);
+  const rawState = {
+    schemaVersion: 1,
+    issue: {
+      input: '#7',
+      number: 7,
+      url: null,
+      canonical: '#7',
+    },
+    workflowPath: join(worktreePath, '.agent/herdr-workflow.yaml'),
+    workflow: normalizeWorkflow(workflowFixture()),
+    sourceRepo: {
+      rootPath: worktreePath,
+      remoteUrl: null,
+      currentBranch: 'main',
+      baseBranch: 'main',
+    },
+    branchName: 'issue-7-herdr-implement',
+    worktreePath,
+    workspaceId: 'w7',
+    currentPhase: 'setup',
+    pendingAgentRun: null,
+    acceptedAgentRuns: {},
+    scriptRuns: {
+      setup: {
+        phaseId: 'setup',
+        runId: 'issue-7-setup-script',
+        command: 'scripts/setup.sh',
+        resolvedCommandPath: join(worktreePath, 'scripts/setup.sh'),
+        args: ['7'],
+        cwd: worktreePath,
+        env: {},
+        timeoutSeconds: 30,
+        startedAt: '2026-07-05T00:00:00.000Z',
+        finishedAt: '2026-07-05T00:00:01.000Z',
+        durationMs: 1000,
+        timedOut: false,
+        exitCode: '1',
+        signal: null,
+        status: 'failed',
+        outcome: 'failure',
+        capture: null,
+        stdout: 'failed\n',
+        stderr: '',
+        retryable: true,
+        stdoutPath: join(worktreePath, '.agent/runs/issue-7-setup-script/stdout.log'),
+        stderrPath: join(worktreePath, '.agent/runs/issue-7-setup-script/stderr.log'),
+        rawOutputPath: join(worktreePath, '.agent/runs/issue-7-setup-script/raw.log'),
+      },
+    },
+    createdAt: '2026-07-05T00:00:00.000Z',
+    updatedAt: '2026-07-05T00:00:00.000Z',
+    daemonHandlePath: join(worktreePath, DAEMON_HANDLE_STATE_PATH),
+    daemon: {
+      tabId: null,
+      paneId: null,
+      command: null,
+      startedAt: null,
+    },
+  };
+
+  writeJsonFile(runStatePath, rawState);
+
+  const state = readWorkflowRunState(runStatePath);
+  assert.equal(state?.scriptRuns.setup, undefined);
+});
+
 test('readDaemonHandleState normalizes role agent maps', () => {
   const worktreePath = tempWorktree();
   const handleStatePath = join(worktreePath, DAEMON_HANDLE_STATE_PATH);

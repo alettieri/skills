@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 import { bootstrap, printBootstrapSummary } from './runtime.ts';
 import { WorkflowValidationError } from './workflow.ts';
+import { optionalTrimmedString } from './validation.ts';
 
 function parseIssue(argv: string[]): string {
   const parsed = parseArgs({
@@ -16,11 +17,16 @@ function parseIssue(argv: string[]): string {
     process.exit(0);
   }
 
-  if (!parsed.values.issue || parsed.values.issue.trim() === '') {
+  return requireIssue(parsed.values.issue);
+}
+
+function requireIssue(value: string | undefined): string {
+  const issue = optionalTrimmedString(value);
+  if (!issue) {
     throw new Error('missing required option --issue');
   }
 
-  return parsed.values.issue;
+  return issue;
 }
 
 function printHelp(): void {

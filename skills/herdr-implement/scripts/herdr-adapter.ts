@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import {
+  isRecord,
+  optionalBoolean,
+  optionalTrimmedString,
+} from './validation.ts';
 
 export type HerdrCommandResult = {
   stdout: string;
@@ -151,30 +156,12 @@ type HerdrAgentLaunchResult = {
 
 const DEFAULT_DAEMON_LABEL = 'herdr-implement-daemon';
 
-function optionalString(value: unknown): string | null {
-  if (typeof value === 'string' && value.trim() !== '') {
-    return value.trim();
-  }
-  return null;
-}
-
 function requireString(value: unknown, field: string): string {
-  const stringValue = optionalString(value);
+  const stringValue = optionalTrimmedString(value);
   if (!stringValue) {
     throw new Error(`${field} must be a non-empty string`);
   }
   return stringValue;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function optionalBoolean(value: unknown): boolean | null {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-  return null;
 }
 
 function runGit(args: string[], cwd: string): string {
@@ -208,7 +195,7 @@ function detectRepositoryInfo(cwd: string): RepositoryInfo {
 
   let remoteUrl: string | null = null;
   try {
-    remoteUrl = optionalString(runGit(['remote', 'get-url', 'origin'], rootPath));
+    remoteUrl = optionalTrimmedString(runGit(['remote', 'get-url', 'origin'], rootPath));
   } catch {
     remoteUrl = null;
   }
@@ -378,7 +365,7 @@ function parseWorktreeCreateOutput(value: unknown): RawHerdrWorktreeRecord {
 
 function firstString(record: Record<string, unknown>, keys: string[]): string | null {
   for (const key of keys) {
-    const value = optionalString(record[key]);
+    const value = optionalTrimmedString(record[key]);
     if (value) {
       return value;
     }
@@ -388,7 +375,7 @@ function firstString(record: Record<string, unknown>, keys: string[]): string | 
 
 function safeParsePaneReference(value: unknown, label: string): SafeParseResult<HerdrPaneReference> {
   if (typeof value === 'string') {
-    return { success: true, data: { id: optionalString(value) } };
+    return { success: true, data: { id: optionalTrimmedString(value) } };
   }
 
   if (!isRecord(value)) {
@@ -405,13 +392,13 @@ function safeParsePaneReference(value: unknown, label: string): SafeParseResult<
     success: true,
     data: {
       id:
-        optionalString(value.tabId) ??
-        optionalString(value.tab_id) ??
-        optionalString(value.paneId) ??
-        optionalString(value.pane_id) ??
-        optionalString(value.id) ??
-        optionalString(value.terminalId) ??
-        optionalString(value.terminal_id),
+        optionalTrimmedString(value.tabId) ??
+        optionalTrimmedString(value.tab_id) ??
+        optionalTrimmedString(value.paneId) ??
+        optionalTrimmedString(value.pane_id) ??
+        optionalTrimmedString(value.id) ??
+        optionalTrimmedString(value.terminalId) ??
+        optionalTrimmedString(value.terminal_id),
     },
   };
 }
@@ -431,7 +418,7 @@ function normalizeAgentLaunchResult(value: unknown): HerdrAgentLaunchResult {
   const payload = unwrapHerdrResult(value);
   if (typeof value === 'string') {
     return {
-      paneId: optionalString(value),
+      paneId: optionalTrimmedString(value),
       tabId: null,
       terminalId: null,
       agentName: null,
@@ -459,7 +446,7 @@ function normalizeAgentLaunchResult(value: unknown): HerdrAgentLaunchResult {
 function normalizePaneInfo(value: unknown): HerdrPaneInfo {
   const payload = unwrapHerdrResult(value);
   if (typeof payload === 'string') {
-    return { paneId: optionalString(payload), tabId: null, terminalId: null };
+    return { paneId: optionalTrimmedString(payload), tabId: null, terminalId: null };
   }
 
   if (!isRecord(payload)) {
@@ -604,17 +591,17 @@ function buildWorktreeCreateArgs(repository: RepositoryInfo, branchName: string,
 
 function workspaceIdFromRaw(record: RawHerdrWorktreeRecord): string | null {
   const raw = record as Record<string, unknown>;
-  return optionalString(raw.workspaceId) ?? optionalString(raw.workspace_id);
+  return optionalTrimmedString(raw.workspaceId) ?? optionalTrimmedString(raw.workspace_id);
 }
 
 function worktreePathFromRaw(record: RawHerdrWorktreeRecord): string | null {
-  return optionalString(record.worktreePath) ?? optionalString(record.path) ?? optionalString(record.cwd);
+  return optionalTrimmedString(record.worktreePath) ?? optionalTrimmedString(record.path) ?? optionalTrimmedString(record.cwd);
 }
 
 function normalizeWorktreeRecord(record: RawHerdrWorktreeRecord, label: string): NormalizedHerdrWorktreeRecord {
   const workspaceId = workspaceIdFromRaw(record);
   const worktreePath = worktreePathFromRaw(record);
-  const branch = optionalString(record.branch);
+  const branch = optionalTrimmedString(record.branch);
   const issues: string[] = [];
 
   if (!workspaceId) {
@@ -635,7 +622,7 @@ function normalizeWorktreeRecord(record: RawHerdrWorktreeRecord, label: string):
     workspaceId: workspaceId!,
     worktreePath: worktreePath!,
     branch: branch!,
-    base: optionalString(record.base),
+    base: optionalTrimmedString(record.base),
   };
 }
 
@@ -644,7 +631,7 @@ function chooseWorktreeRecord(
   branchName: string,
   label: string,
 ): NormalizedHerdrWorktreeRecord | null {
-  const record = records.find((entry) => optionalString(entry.branch) === branchName) ?? null;
+  const record = records.find((entry) => optionalTrimmedString(entry.branch) === branchName) ?? null;
   if (!record) {
     return null;
   }

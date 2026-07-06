@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
 import { loadWorkflow, WorkflowValidationError } from './workflow.ts';
+import { optionalTrimmedString } from './validation.ts';
 
 function parseIssue(argv: string[]): string {
   const parsed = parseArgs({
@@ -20,11 +21,16 @@ function parseIssue(argv: string[]): string {
     process.exit(0);
   }
 
-  if (!parsed.values.issue || parsed.values.issue.trim() === '') {
+  return normalizeIssueReference(requireIssue(parsed.values.issue));
+}
+
+function requireIssue(value: string | undefined): string {
+  const issue = optionalTrimmedString(value);
+  if (!issue) {
     throw new Error('missing required option --issue');
   }
 
-  return normalizeIssueReference(parsed.values.issue);
+  return issue;
 }
 
 function normalizeIssueReference(value: string): string {
