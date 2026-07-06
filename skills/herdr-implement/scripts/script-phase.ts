@@ -3,6 +3,7 @@ import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { NormalizedPhase, NormalizedWorkflow } from './workflow.ts';
+import { normalizeCapture } from './capture.ts';
 
 export type IssueReference = {
   input: string;
@@ -133,21 +134,6 @@ function normalizeStringRecord(value: unknown): Record<string, string> | null {
   }
 
   return result;
-}
-
-function normalizeCapture(value: unknown): Record<string, unknown> | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const capture: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (typeof key !== 'string') {
-      return null;
-    }
-    capture[key] = entry;
-  }
-  return capture;
 }
 
 export function normalizeScriptRun(value: unknown): ScriptRunState | null {

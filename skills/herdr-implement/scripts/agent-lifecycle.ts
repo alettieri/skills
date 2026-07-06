@@ -3,19 +3,11 @@ import { dirname, join, resolve } from 'node:path';
 import type { DaemonHandleState, DaemonStepResult, PendingAgentRunState, RoleAgentState, WorkflowRunState } from './runtime.ts';
 import type { HerdrAdapter } from './herdr-adapter.ts';
 import type { NormalizedPhase, NormalizedWorkflow } from './workflow.ts';
-
-type ResultArtifact = {
-  schemaVersion: number;
-  runId: string;
-  role: string;
-  phase: string;
-  status: 'complete' | 'blocked' | 'failed';
-  outcome: string;
-  capture: Record<string, unknown> | null;
-  summary: string | null;
-  payload: Record<string, unknown> | null;
-  resultSchema: string | null;
-};
+import {
+  applyAcceptedResultArtifact,
+  createAcceptedResultArtifactSummary,
+  evaluateResultArtifact,
+} from './result-artifact.ts';
 
 export type AgentLifecycleOptions = {
   cwd: string;
@@ -59,21 +51,6 @@ function optionalBoolean(value: unknown): boolean | null {
     return value;
   }
   return null;
-}
-
-function normalizeCapture(value: unknown): Record<string, unknown> | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const capture: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (typeof key !== 'string') {
-      return null;
-    }
-    capture[key] = entry;
-  }
-  return capture;
 }
 
 function renderTemplate(source: string, values: Record<string, string>): string {
@@ -232,20 +209,6 @@ function agentTargetForPendingRun(
   return renderAgentName(agentNameTemplate, state, roleId);
 }
 
-function mergeCaptureIntoContext(
-  context: Record<string, unknown>,
-  capture: Record<string, unknown> | null,
-): Record<string, unknown> {
-  if (!capture) {
-    return context;
-  }
-
-  return {
-    ...context,
-    ...capture,
-  };
-}
-
 function withArtifactRewriteRequest(
   state: WorkflowRunState,
   pendingRun: PendingAgentRunState,
@@ -266,137 +229,6 @@ function withArtifactRewriteRequest(
       },
     },
   };
-}
-
-function readResultArtifact(resultPath: string): ResultArtifact | null {
-  if (!existsSync(resultPath)) {
-    return null;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(resultPath, 'utf8')) as unknown;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`result artifact is not valid JSON: ${message}`);
-  }
-
-  if (!isRecord(parsed)) {
-    throw new Error('result artifact must be a JSON object');
-  }
-
-  const schemaVersion = parsed.schemaVersion;
-  if (schemaVersion !== 1) {
-    throw new Error('result artifact schemaVersion must be 1');
-  }
-
-  const runId = optionalString(parsed.runId);
-  const role = optionalString(parsed.role);
-  const phase = optionalString(parsed.phase);
-  const status =
-    parsed.status === 'complete' || parsed.status === 'blocked' || parsed.status === 'failed' ? parsed.status : null;
-  const outcome = optionalString(parsed.outcome);
-  const summary = optionalString(parsed.summary);
-  const capture = parsed.capture === undefined ? null : normalizeCapture(parsed.capture);
-  const payload = parsed.payload === undefined ? null : normalizeCapture(parsed.payload);
-  const resultSchema = optionalString(parsed.resultSchema);
-
-  if (!runId || !role || !phase || !status || !outcome) {
-    throw new Error('result artifact is missing required completion fields');
-  }
-
-  if (parsed.capture !== undefined && capture === null) {
-    throw new Error('result artifact capture must be an object with string keys');
-  }
-
-  if (parsed.payload !== undefined && payload === null) {
-    throw new Error('result artifact payload must be an object with string keys');
-  }
-
-  return {
-    schemaVersion,
-    runId,
-    role,
-    phase,
-    status,
-    outcome,
-    capture,
-    summary,
-    payload,
-    resultSchema,
-  };
-}
-
-function resultArtifactMatchesSchema(artifact: ResultArtifact, expectedResultSchema: string | null): boolean {
-  if (!expectedResultSchema) {
-    return true;
-  }
-
-  return artifact.resultSchema === expectedResultSchema;
-}
-
-function validateResultArtifact(artifact: ResultArtifact, pendingRun: PendingAgentRunState, phase: NormalizedPhase): void {
-  if (artifact.runId !== pendingRun.runId) {
-    throw new Error(`result artifact runId mismatch: expected ${pendingRun.runId}, found ${artifact.runId}`);
-  }
-  if (artifact.phase !== pendingRun.phaseId) {
-    throw new Error(`result artifact phase mismatch: expected ${pendingRun.phaseId}, found ${artifact.phase}`);
-  }
-  if (artifact.role !== pendingRun.completionRole) {
-    throw new Error(`result artifact role mismatch: expected ${pendingRun.completionRole}, found ${artifact.role}`);
-  }
-  if (!resultArtifactMatchesSchema(artifact, pendingRun.resultSchema ?? optionalString(phase.resultSchema))) {
-    throw new Error(
-      `result artifact schema mismatch: expected ${pendingRun.resultSchema ?? optionalString(phase.resultSchema) ?? 'any'}, found ${artifact.resultSchema ?? 'missing'}`,
-    );
-  }
-  if (!Object.hasOwn(phase.on, artifact.outcome)) {
-    throw new Error(`result artifact outcome ${artifact.outcome} is not declared by phase ${pendingRun.phaseId}`);
-  }
-  if (artifact.capture !== null && !isRecord(artifact.capture)) {
-    throw new Error('result artifact capture must be an object with string keys');
-  }
-}
-
-function recordAcceptedAgentRun(
-  state: WorkflowRunState,
-  pendingRun: PendingAgentRunState,
-  artifact: ResultArtifact,
-  acceptedAt: string,
-): WorkflowRunState {
-  return {
-    ...state,
-    currentPhase: resolveNextPhase(state.workflow, pendingRun.phaseId, artifact.outcome) ?? state.currentPhase,
-    context: mergeCaptureIntoContext(state.context, artifact.capture),
-    pendingAgentRun: null,
-    acceptedAgentRuns: {
-      ...state.acceptedAgentRuns,
-      [pendingRun.runId]: {
-        runId: pendingRun.runId,
-        phaseId: pendingRun.phaseId,
-        roleId: pendingRun.roleId,
-        roleLabel: pendingRun.roleLabel,
-        agentName: pendingRun.agentName,
-        resultSchema: pendingRun.resultSchema ?? artifact.resultSchema,
-        resultPath: pendingRun.resultPath,
-        acceptedAt,
-        status: artifact.status,
-        outcome: artifact.outcome,
-        summary: artifact.summary,
-        capture: artifact.capture,
-      },
-    },
-    updatedAt: acceptedAt,
-  };
-}
-
-function createAcceptedAgentRunSummary(artifact: ResultArtifact, pendingRun: PendingAgentRunState): string {
-  return [
-    `accepted result artifact for ${pendingRun.runId}`,
-    `outcome=${artifact.outcome}`,
-    `status=${artifact.status}`,
-    artifact.summary ? `summary=${artifact.summary}` : 'summary=(none)',
-  ].join('; ');
 }
 
 function renderAgentPhasePrompt(
@@ -646,46 +478,15 @@ function processPendingAgentRun(
     };
   }
 
-  let artifact: ResultArtifact | null;
-  try {
-    artifact = readResultArtifact(pendingRun.resultPath);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return rewritePendingArtifact(adapter, state, handleState, pendingRun, phase, message, now);
-  }
+  const evaluated = evaluateResultArtifact({
+    resultPath: pendingRun.resultPath,
+    pendingRun,
+    phase,
+  });
 
-  if (artifact) {
-    try {
-      validateResultArtifact(artifact, pendingRun, phase);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const isStale = /runId mismatch|phase mismatch|role mismatch/.test(message);
-      if (isStale) {
-        const updatedAt = nowIso(now);
-        const refreshed = {
-          ...state,
-          updatedAt,
-          context: {
-            ...state.context,
-            lastRejectedAgentResult: {
-              runId: artifact.runId,
-              expectedRunId: pendingRun.runId,
-              phaseId: pendingRun.phaseId,
-              roleId: pendingRun.roleId,
-              reason: message,
-              rejectedAt: updatedAt,
-            },
-          },
-        };
-
-        return rewritePendingArtifact(adapter, refreshed, handleState, pendingRun, phase, message, now);
-      }
-
-      return rewritePendingArtifact(adapter, state, handleState, pendingRun, phase, message, now);
-    }
-
+  if (evaluated.kind === 'accepted') {
     const acceptedAt = nowIso(now);
-    const updatedState = recordAcceptedAgentRun(state, pendingRun, artifact, acceptedAt);
+    const updatedState = applyAcceptedResultArtifact(state, pendingRun, evaluated.artifact, acceptedAt);
 
     return {
       state: updatedState,
@@ -693,9 +494,34 @@ function processPendingAgentRun(
         status: 'continue',
         currentPhase: pendingRun.phaseId,
         nextPhase: updatedState.currentPhase,
-        reason: createAcceptedAgentRunSummary(artifact, pendingRun),
+        reason: createAcceptedResultArtifactSummary(evaluated.artifact, pendingRun),
       },
     };
+  }
+
+  if (evaluated.kind === 'stale') {
+    const updatedAt = nowIso(now);
+    const refreshed = {
+      ...state,
+      updatedAt,
+      context: {
+        ...state.context,
+        lastRejectedAgentResult: {
+          runId: evaluated.artifact.runId,
+          expectedRunId: pendingRun.runId,
+          phaseId: pendingRun.phaseId,
+          roleId: pendingRun.roleId,
+          reason: evaluated.reason,
+          rejectedAt: updatedAt,
+        },
+      },
+    };
+
+    return rewritePendingArtifact(adapter, refreshed, handleState, pendingRun, phase, evaluated.reason, now);
+  }
+
+  if (evaluated.kind === 'invalid') {
+    return rewritePendingArtifact(adapter, state, handleState, pendingRun, phase, evaluated.reason, now);
   }
 
   const agentName = agentTargetForPendingRun(state, handleState, pendingRun);

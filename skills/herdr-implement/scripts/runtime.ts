@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { loadWorkflow } from './workflow.ts';
 import type { NormalizedPhase, NormalizedWorkflow } from './workflow.ts';
 import { createHerdrAdapter, type HerdrAdapter } from './herdr-adapter.ts';
+import { mergeCaptureIntoContext, normalizeCapture } from './capture.ts';
 import {
   executeScriptPhase,
   normalizeScriptRunMap,
@@ -234,35 +235,6 @@ function optionalBoolean(value: unknown): boolean | null {
 
 function completionRoleFor(roleId: string): 'implementer' | 'reviewer' {
   return roleId === 'reviewer' ? 'reviewer' : 'implementer';
-}
-
-function normalizeCapture(value: unknown): Record<string, unknown> | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const capture: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (typeof key !== 'string') {
-      return null;
-    }
-    capture[key] = entry;
-  }
-  return capture;
-}
-
-function mergeCaptureIntoContext(
-  context: Record<string, unknown>,
-  capture: Record<string, unknown> | null,
-): Record<string, unknown> {
-  if (!capture) {
-    return context;
-  }
-
-  return {
-    ...context,
-    ...capture,
-  };
 }
 
 function runGit(args: string[], cwd: string): string {
