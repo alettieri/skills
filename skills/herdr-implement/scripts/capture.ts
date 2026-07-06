@@ -1,5 +1,7 @@
+import { isRecord } from './validation.ts';
+
 export function normalizeCapture(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return null;
   }
 

@@ -8,6 +8,7 @@ import { createHerdrAdapter, type HerdrAdapter } from './herdr-adapter.ts';
 import { mergeCaptureIntoContext } from './capture.ts';
 import { executeScriptPhase, recoverCompletedScriptPhase } from './script-phase.ts';
 import { advanceAgentWorkOnce } from './agent-lifecycle.ts';
+import { optionalTrimmedString } from './validation.ts';
 import {
   DAEMON_HANDLE_STATE_PATH,
   WORKFLOW_RUN_STATE_PATH,
@@ -109,21 +110,6 @@ function nowIso(now?: () => Date): string {
   return (now?.() ?? new Date()).toISOString();
 }
 
-function optionalString(value: unknown): string | null {
-  if (typeof value === 'string' && value.trim() !== '') {
-    return value.trim();
-  }
-  return null;
-}
-
-function requireString(value: unknown, field: string): string {
-  const stringValue = optionalString(value);
-  if (!stringValue) {
-    throw new Error(`${field} must be a non-empty string`);
-  }
-  return stringValue;
-}
-
 function runGit(args: string[], cwd: string): string {
   const result = spawnSync('git', args, {
     cwd,
@@ -155,7 +141,7 @@ function detectRepositoryInfo(cwd: string): RepositoryInfo {
 
   let remoteUrl: string | null = null;
   try {
-    remoteUrl = optionalString(runGit(['remote', 'get-url', 'origin'], rootPath));
+    remoteUrl = optionalTrimmedString(runGit(['remote', 'get-url', 'origin'], rootPath));
   } catch {
     remoteUrl = null;
   }

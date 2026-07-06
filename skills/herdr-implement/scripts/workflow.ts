@@ -1,6 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse as parseYamlDocument } from 'yaml';
+import {
+  isRecord,
+  optionalFiniteNumber,
+  optionalTrimmedString,
+} from './validation.ts';
 
 export type WorkflowSource = {
   path: string;
@@ -171,19 +176,21 @@ function validateReferences(
 }
 
 function requireVersion(value: unknown): string {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return String(value);
+  const numericValue = optionalFiniteNumber(value);
+  if (numericValue !== null) {
+    return String(numericValue);
   }
 
   return requireString(value, 'version');
 }
 
 function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim() === '') {
+  const stringValue = optionalTrimmedString(value);
+  if (!stringValue) {
     throw new WorkflowValidationError(`${field} must be a non-empty string`);
   }
 
-  return value;
+  return typeof value === 'string' ? value : stringValue;
 }
 
 function optionalStringMap(value: unknown, field: string): Record<string, string> {
@@ -218,11 +225,11 @@ function optionalString(value: unknown, field: string): string | undefined {
 }
 
 function requireRecord(value: unknown, field: string): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+  if (!isRecord(value)) {
     throw new WorkflowValidationError(`${field} must be an object`);
   }
 
-  return value as Record<string, unknown>;
+  return value;
 }
 
 export function parseYaml(source: string): unknown {

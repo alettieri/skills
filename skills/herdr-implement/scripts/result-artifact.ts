@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { mergeCaptureIntoContext, normalizeCapture } from './capture.ts';
 import type { NormalizedPhase } from './workflow.ts';
 import type { PendingAgentRunState, WorkflowRunState } from './workflow-state-store.ts';
+import { isRecord, optionalTrimmedString } from './validation.ts';
 
 export type ResultArtifact = {
   schemaVersion: number;
@@ -21,17 +22,6 @@ export type ResultArtifactEvaluation =
   | { kind: 'invalid'; reason: string }
   | { kind: 'stale'; reason: string; artifact: ResultArtifact }
   | { kind: 'accepted'; artifact: ResultArtifact };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function optionalString(value: unknown): string | null {
-  if (typeof value === 'string' && value.trim() !== '') {
-    return value.trim();
-  }
-  return null;
-}
 
 function resultArtifactMatchesSchema(artifact: ResultArtifact, expectedResultSchema: string | null): boolean {
   if (!expectedResultSchema) {
@@ -63,16 +53,16 @@ function readResultArtifact(resultPath: string): ResultArtifact | null {
     throw new Error('result artifact schemaVersion must be 1');
   }
 
-  const runId = optionalString(parsed.runId);
-  const role = optionalString(parsed.role);
-  const phase = optionalString(parsed.phase);
+  const runId = optionalTrimmedString(parsed.runId);
+  const role = optionalTrimmedString(parsed.role);
+  const phase = optionalTrimmedString(parsed.phase);
   const status =
     parsed.status === 'complete' || parsed.status === 'blocked' || parsed.status === 'failed' ? parsed.status : null;
-  const outcome = optionalString(parsed.outcome);
-  const summary = optionalString(parsed.summary);
+  const outcome = optionalTrimmedString(parsed.outcome);
+  const summary = optionalTrimmedString(parsed.summary);
   const capture = parsed.capture === undefined ? null : normalizeCapture(parsed.capture);
   const payload = parsed.payload === undefined ? null : normalizeCapture(parsed.payload);
-  const resultSchema = optionalString(parsed.resultSchema);
+  const resultSchema = optionalTrimmedString(parsed.resultSchema);
 
   if (!runId || !role || !phase || !status || !outcome) {
     throw new Error('result artifact is missing required completion fields');
@@ -126,7 +116,7 @@ function classifyResultArtifact(
     };
   }
 
-  const expectedResultSchema = pendingRun.resultSchema ?? optionalString(phase.resultSchema);
+  const expectedResultSchema = pendingRun.resultSchema ?? optionalTrimmedString(phase.resultSchema);
   if (!resultArtifactMatchesSchema(artifact, expectedResultSchema)) {
     return {
       kind: 'invalid',

@@ -8,6 +8,11 @@ import {
   createAcceptedResultArtifactSummary,
   evaluateResultArtifact,
 } from './result-artifact.ts';
+import {
+  isRecord,
+  optionalBoolean,
+  optionalTrimmedString as optionalString,
+} from './validation.ts';
 import type {
   DaemonHandleState,
   PendingAgentRunState,
@@ -33,30 +38,12 @@ function nowIso(now: () => Date): string {
   return now().toISOString();
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function optionalString(value: unknown): string | null {
-  if (typeof value === 'string' && value.trim() !== '') {
-    return value.trim();
-  }
-  return null;
-}
-
 function requireString(value: unknown, field: string): string {
   const stringValue = optionalString(value);
   if (!stringValue) {
     throw new Error(`${field} must be a non-empty string`);
   }
   return stringValue;
-}
-
-function optionalBoolean(value: unknown): boolean | null {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-  return null;
 }
 
 function renderTemplate(source: string, values: Record<string, string>): string {

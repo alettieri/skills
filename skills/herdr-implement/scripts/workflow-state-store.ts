@@ -3,6 +3,11 @@ import { dirname, join } from 'node:path';
 import { normalizeCapture } from './capture.ts';
 import { normalizeScriptRunMap, type ScriptRunState } from './script-phase.ts';
 import type { NormalizedWorkflow } from './workflow.ts';
+import {
+  isRecord,
+  optionalFiniteNumber,
+  optionalTrimmedString as optionalString,
+} from './validation.ts';
 
 export const WORKFLOW_RUN_STATE_PATH = '.agent/herdr-workflow-run.json';
 export const DAEMON_HANDLE_STATE_PATH = '.agent/herdr-implement.json';
@@ -100,10 +105,6 @@ export type WorkflowRunState = {
   };
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function ensureDir(path: string): void {
   mkdirSync(dirname(path), { recursive: true });
 }
@@ -119,13 +120,6 @@ function readJsonFile(path: string): unknown | null {
 function writeJsonFile(path: string, value: unknown): void {
   ensureDir(path);
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-}
-
-function optionalString(value: unknown): string | null {
-  if (typeof value === 'string' && value.trim() !== '') {
-    return value.trim();
-  }
-  return null;
 }
 
 function completionRoleFor(roleId: string): 'implementer' | 'reviewer' {
@@ -159,7 +153,7 @@ export function normalizePendingAgentRun(value: unknown): PendingAgentRunState |
   const resultPath = optionalString(value.resultPath);
   const notifyTarget = optionalString(value.notifyTarget);
   const status = value.status === 'pending' ? value.status : null;
-  const attemptNumber = typeof value.attemptNumber === 'number' && Number.isFinite(value.attemptNumber) ? value.attemptNumber : null;
+  const attemptNumber = optionalFiniteNumber(value.attemptNumber);
   const startedAt = optionalString(value.startedAt);
 
   if (

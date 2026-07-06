@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import {
+  isRecord,
+  optionalBoolean,
+  optionalTrimmedString as optionalString,
+} from './validation.ts';
 
 export type HerdrCommandResult = {
   stdout: string;
@@ -151,30 +156,12 @@ type HerdrAgentLaunchResult = {
 
 const DEFAULT_DAEMON_LABEL = 'herdr-implement-daemon';
 
-function optionalString(value: unknown): string | null {
-  if (typeof value === 'string' && value.trim() !== '') {
-    return value.trim();
-  }
-  return null;
-}
-
 function requireString(value: unknown, field: string): string {
   const stringValue = optionalString(value);
   if (!stringValue) {
     throw new Error(`${field} must be a non-empty string`);
   }
   return stringValue;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function optionalBoolean(value: unknown): boolean | null {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-  return null;
 }
 
 function runGit(args: string[], cwd: string): string {
