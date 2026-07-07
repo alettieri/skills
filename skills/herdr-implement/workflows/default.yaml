@@ -103,6 +103,7 @@ phases:
     command: scripts/run-checks.sh
     on:
       success: commit_changes
+      no_checks: commit_changes
       checks_failed: fix
       blocked: blocked
       failure: failed

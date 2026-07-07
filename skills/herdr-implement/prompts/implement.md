@@ -16,4 +16,20 @@ When you are done, write the JSON result artifact at `{{ resultPath }}` and invo
 {{ completionUtility }} --run-id {{ runId }} --role {{ completionRole }} --phase {{ phaseId }} --result {{ resultPath }} --notify-target {{ notifyTarget }}
 ```
 
-The result artifact must use schemaVersion 1 and include `outcome`, `summary`, and any evidence needed by the workflow.
+Write a schemaVersion 1 result artifact with this envelope:
+
+```json
+{
+  "schemaVersion": 1,
+  "runId": "{{ runId }}",
+  "phase": "{{ phaseId }}",
+  "role": "{{ completionRole }}",
+  "status": "complete",
+  "outcome": "<one declared by the phase>",
+  "capture": {},
+  "summary": "short completion summary",
+  "payload": {}
+}
+```
+
+The daemon routes by `outcome`, not prose. Make `outcome` exactly one of the phase's declared transitions. Use `capture` only for machine-readable context that should flow into the workflow; use `payload` for role-specific evidence such as changed files, commands run, or notes.
