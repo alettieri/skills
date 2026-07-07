@@ -21,6 +21,8 @@ test('loads the default workflow', () => {
   assert.equal(source.workflow.phases.commit_changes.type, 'script');
   assert.equal(source.workflow.phases.push_branch.type, 'script');
   assert.equal(source.workflow.phases.create_pr.type, 'script');
+  assert.equal(source.workflow.phases.await_review.type, 'poll');
+  assert.equal(source.workflow.phases.await_merge.type, 'poll');
 });
 
 test('project workflow fully replaces the default when present', async () => {
@@ -191,6 +193,68 @@ test('generic transition fields are rejected', () => {
         },
       }),
     /phase one must use named on transitions/,
+  );
+});
+
+test('poll phases require a command, interval, and string args', () => {
+  assert.throws(
+    () =>
+      normalizeWorkflow({
+        name: 'bad-poll',
+        version: 1,
+        type: 'herdr.issue',
+        start: 'poll',
+        roles: {},
+        phases: {
+          poll: {
+            type: 'poll',
+            intervalSeconds: 30,
+            on: { waiting: 'poll' },
+          },
+        },
+      }),
+    /phases\.poll\.command must be a non-empty string/,
+  );
+
+  assert.throws(
+    () =>
+      normalizeWorkflow({
+        name: 'bad-poll',
+        version: 1,
+        type: 'herdr.issue',
+        start: 'poll',
+        roles: {},
+        phases: {
+          poll: {
+            type: 'poll',
+            command: 'scripts/check-pr-review.sh',
+            intervalSeconds: 0,
+            on: { waiting: 'poll' },
+          },
+        },
+      }),
+    /phases\.poll\.intervalSeconds must be a positive number/,
+  );
+
+  assert.throws(
+    () =>
+      normalizeWorkflow({
+        name: 'bad-poll',
+        version: 1,
+        type: 'herdr.issue',
+        start: 'poll',
+        roles: {},
+        phases: {
+          poll: {
+            type: 'poll',
+            command: 'scripts/check-pr-review.sh',
+            args: [1],
+            intervalSeconds: 30,
+            on: { waiting: 'poll' },
+          },
+        },
+      }),
+    /phases\.poll\.args must be an array of strings/,
   );
 });
 

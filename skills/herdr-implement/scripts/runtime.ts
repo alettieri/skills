@@ -7,6 +7,7 @@ import { createHerdrAdapter, type HerdrAdapter } from './herdr-adapter.ts';
 import { mergeCaptureIntoContext } from './capture.ts';
 import { isTerminalPhase, resolveNextPhase } from './workflow-transition.ts';
 import { executeScriptPhase, recoverCompletedScriptPhase } from './script-phase.ts';
+import { advancePollWorkOnce } from './poll-phase.ts';
 import { advanceAgentWorkOnce } from './agent-lifecycle.ts';
 import { optionalTrimmedString } from './validation.ts';
 import {
@@ -332,6 +333,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     pendingAgentRun: null,
     acceptedAgentRuns: {},
     scriptRuns: {},
+    pollRuns: {},
     createdAt,
     updatedAt: createdAt,
     daemonHandlePath: handleStatePath,
@@ -494,6 +496,18 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
       nextPhase: executed.nextPhase ?? undefined,
       reason: `script phase ${currentPhase} completed with ${executed.record.outcome}`,
     };
+  }
+
+  if (phase?.type === 'poll') {
+    const advancedPoll = advancePollWorkOnce({
+      cwd,
+      state: advanced,
+      phaseId: currentPhase,
+      phase,
+      now,
+    });
+    writeWorkflowRunState(statePath, advancedPoll.state);
+    return advancedPoll.result;
   }
 
   const refreshed = {
