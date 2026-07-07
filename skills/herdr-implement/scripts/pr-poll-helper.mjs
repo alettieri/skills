@@ -1,4 +1,10 @@
 import { spawnSync } from 'node:child_process';
+import {
+  maxTimestamp,
+  normalizeCheckResultsPayload,
+  normalizePullRequestPayload,
+  summarizeChecks,
+} from '../../herdr-worktree-flow/scripts/pr-monitor-domain.ts';
 
 function fail(message) {
   process.stderr.write(`${message}\n`);
@@ -33,65 +39,6 @@ function runGhJson(args, allowNoChecks = false) {
 
 function optionalString(value) {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
-}
-
-function latestTimestamp(values) {
-  const timestamps = values
-    .map((value) => (typeof value === 'string' && value ? Date.parse(value) : Number.NEGATIVE_INFINITY))
-    .filter((value) => Number.isFinite(value));
-  if (timestamps.length === 0) {
-    return null;
-  }
-  return new Date(Math.max(...timestamps)).toISOString();
-}
-
-function bucketRank(bucket) {
-  switch (bucket) {
-    case 'fail':
-      return 4;
-    case 'pending':
-      return 3;
-    case 'cancel':
-      return 2;
-    case 'skipping':
-      return 1;
-    case 'pass':
-      return 0;
-    default:
-      return -1;
-  }
-}
-
-function summarizeChecks(checks) {
-  const summary = {
-    bucket: 'unknown',
-    total: checks.length,
-    failing: 0,
-    pending: 0,
-    canceled: 0,
-    skipped: 0,
-    passing: 0,
-  };
-
-  for (const check of checks) {
-    const bucket = typeof check?.bucket === 'string' ? check.bucket : 'unknown';
-    if (bucketRank(bucket) > bucketRank(summary.bucket)) {
-      summary.bucket = bucket;
-    }
-    if (bucket === 'fail') {
-      summary.failing += 1;
-    } else if (bucket === 'pending') {
-      summary.pending += 1;
-    } else if (bucket === 'cancel') {
-      summary.canceled += 1;
-    } else if (bucket === 'skipping') {
-      summary.skipped += 1;
-    } else if (bucket === 'pass') {
-      summary.passing += 1;
-    }
-  }
-
-  return summary;
 }
 
 function resolveOutcome(mode, pr, checksSummary, feedbackPresent) {
@@ -163,19 +110,19 @@ function main() {
       prViewArgs.push(prRef);
     }
     prViewArgs.push('--json', prFields);
-    const pr = runGhJson(prViewArgs);
+    const pr = normalizePullRequestPayload(runGhJson(prViewArgs));
 
     const checksArgs = ['pr', 'checks'];
     if (prRef) {
       checksArgs.push(prRef);
     }
     checksArgs.push('--json', 'bucket,state,name,workflow,description,link');
-    const checks = runGhJson(checksArgs, true) ?? [];
+    const checks = normalizeCheckResultsPayload(runGhJson(checksArgs, true));
 
-    const commentCount = Array.isArray(pr.comments) ? pr.comments.length : 0;
-    const reviewCount = Array.isArray(pr.reviews) ? pr.reviews.length : 0;
-    const latestCommentAt = latestTimestamp(Array.isArray(pr.comments) ? pr.comments.map((comment) => comment?.createdAt) : []);
-    const latestReviewAt = latestTimestamp(Array.isArray(pr.reviews) ? pr.reviews.map((review) => review?.submittedAt) : []);
+    const commentCount = pr.comments.length;
+    const reviewCount = pr.reviews.length;
+    const latestCommentAt = maxTimestamp(pr.comments.map((comment) => comment.createdAt));
+    const latestReviewAt = maxTimestamp(pr.reviews.map((review) => review.submittedAt));
     const checksSummary = summarizeChecks(checks);
     const feedbackPresent = commentCount > 0 || reviewCount > 0;
 
