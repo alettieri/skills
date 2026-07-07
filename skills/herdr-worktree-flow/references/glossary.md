@@ -24,6 +24,14 @@ The small machine-readable message that wakes the issue orchestrator after a del
 
 The workflow-owned script at `skills/herdr-worktree-flow/scripts/agent-run-complete.ts`. It validates the result artifact and Herdr notification target, delivers the completion notification, presses Return in the resolved Codex pane, retries delivery, and records `.agent/runs/<runId>/notification.json`.
 
+## Architecture-fit check
+
+The pre-implementation review that identifies the relevant ADRs, existing modules, seams, and helpers before broad changes begin. It records what will be reused through its intended public surface, what will not be reused and why, and whether any new seam is truly needed.
+
+## Reuse note
+
+The implementation-time record of why a module, seam, or helper was reused or intentionally not reused. Reuse notes must distinguish acceptable reuse through the intended public API from forbidden seam bypassing or wrapping that recreates the same responsibility elsewhere.
+
 ## Post-worktree setup hook
 
 The committed executable hook at `.agent/herdr-post-worktree-setup` in the newly created issue worktree. The main orchestrator runs it from the worktree root before writing the final issue brief or launching the issue orchestrator.

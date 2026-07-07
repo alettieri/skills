@@ -37,7 +37,7 @@ The issue orchestrator maintains two local state files under `.agent/`:
 - `.agent/issue-lifecycle.md`: narrative status log for handoff and recovery.
 - `.agent/herdr-worktree-flow.json`: machine-readable Herdr workspace handles for tab reuse and agent communication.
 
-The lifecycle log should record the issue reference, branch, expected and actual launch mode/model for each spawned agent, agents launched, implementation summary, review verdicts, verification outcomes, PR URL, and PR feedback cycles.
+The lifecycle log should record the issue reference, branch, expected and actual launch mode/model for each spawned agent, agents launched, implementation summary, review verdicts, verification outcomes, PR URL, PR feedback cycles, and the architecture-fit notes for each implementation/review loop.
 
 The workspace state file should record the workspace id and the tab, pane, terminal, agent, and role label for the issue orchestrator, implementer, and review orchestrator. Use it to decide whether a role already has a dedicated tab, and to find the correct Herdr target when sending handoff, review, or fix instructions. Use `agentName` or `terminalId` for `herdr agent send`; use `tabId` for tab focus; use `paneId` for pane reads or pane-level input when needed.
 
@@ -90,6 +90,7 @@ node skills/herdr-worktree-flow/scripts/agent-run-complete.ts \
 The utility validates the artifact and target, sends `AGENT_RUN_COMPLETE <runId> <resultPath>` with human-readable context, presses Return in the resolved Codex agent pane, retries delivery, and writes `.agent/runs/<runId>/notification.json`. Directly typing or sending `AGENT_RUN_COMPLETE` is legacy/manual recovery only, not the normal path.
 
 The issue orchestrator treats the completion notification as a wake-up signal, reads the artifact, and validates the `runId`, `role`, `phase`, `status`, and role-specific evidence before advancing lifecycle state. Missing, malformed, duplicate, stale, or missed notifications are handled through the contract documented in `references/agent-run-completion-adr.md`.
+Implementer result artifacts or lifecycle logs must also capture the architecture-fit notes for the run: which existing modules, seams, and helpers were reused, which were intentionally not reused and why, which new seams were introduced, and whether any ADR-owned seam was at risk of being bypassed or wrapped incorrectly.
 
 ## Agent Launch Policy
 
@@ -142,9 +143,16 @@ Write one canonical briefing file into the worktree before handoff. The issue or
 4. Run `node skills/herdr-worktree-flow/scripts/post-worktree-setup.ts <worktree-path>` from the source checkout. If setup returns `blocked`, stop before writing the final issue brief or launching the issue orchestrator and report the blocker with `.agent/post-worktree-setup.log`.
 5. Confirm successful setup left the worktree clean using the helper result. The helper checks `git status --porcelain --untracked-files=normal`.
 6. Write the issue brief with setup status, hook path, and log path.
-7. Start an issue orchestrator agent in the issue workspace.
-8. Move the returned issue orchestrator pane into a new dedicated orchestrator tab.
-9. Pass the issue orchestrator:
+7. Before implementation starts, perform an architecture-fit check:
+   - read the relevant ADRs in `docs/adr/` and any other docs that define the touched boundary
+   - identify the existing modules, seams, and helpers that already solve part of the change
+   - decide what will be reused through its intended public surface versus what will not be reused and why
+   - note any new seam that the issue truly needs
+   - confirm no ADR-owned seam is being bypassed or wrapped in a way that duplicates its responsibility elsewhere
+   - record the outcome in the issue brief and lifecycle log
+8. Start an issue orchestrator agent in the issue workspace.
+9. Move the returned issue orchestrator pane into a new dedicated orchestrator tab.
+10. Pass the issue orchestrator:
    - the path to the worktree briefing file, usually `.agent/issue-brief.md` or `.codex/issue-brief.md`
    - issue number/URL
    - base branch
@@ -209,6 +217,7 @@ herdr pane move <returned-pane-id> --new-tab --workspace <workspace-id> --label 
 
 Record the review orchestrator `tabId`, `paneId`, `terminalId`, `agentName`, and `roleLabel` in `.agent/herdr-worktree-flow.json`. Before a PR exists, it runs the `/review-pr` lenses internally against the local diff; once a PR exists, it uses `/review-pr` directly. Review passes when there are no Block or Major findings. Minor findings may be fixed at the issue orchestrator's discretion. Nits are non-blocking.
 The review run uses the same completion contract: write the result artifact first, run `scripts/agent-run-complete.ts`, and validate the artifact before advancing lifecycle state.
+The review pass must include a DRY and deep-module check: look for duplicated behavior, widened interfaces, exported internals, whether a new shared module is warranted, and whether reuse respects accepted seams instead of bypassing or re-wrapping them.
 
 For Block or Major findings:
 
