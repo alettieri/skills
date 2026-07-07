@@ -1,32 +1,32 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import type { NormalizedPhase, NormalizedWorkflow } from './workflow.ts';
+import type { NormalizedPhase } from './workflow.ts';
 import { normalizeCapture } from './capture.ts';
 import { resolveNextPhase } from './workflow-transition.ts';
+import {
+  buildCommandEnvironment,
+  buildCommandRunPaths,
+  parseCommandOutcome,
+  renderCommandArgs,
+  renderCommandEnv,
+  renderCommandTemplate,
+  resolveCommandPath,
+  commandLogContents,
+  writeCommandLogFiles,
+  type CommandPhaseWorkflowState,
+  type CommandRunPaths,
+} from './command-phase.ts';
 import {
   isRecord,
   optionalBoolean,
   optionalFiniteNumber,
   optionalTrimmedString,
 } from './validation.ts';
-import { renderTemplate } from './text-template.ts';
-
-export type IssueReference = {
-  input: string;
-  number: number | null;
-  url: string | null;
-  canonical: string;
-};
 
 export type ScriptRunStatus = 'complete' | 'blocked' | 'failed' | 'timeout';
 
-export type ScriptRunPaths = {
-  stdoutPath: string;
-  stderrPath: string;
-  rawOutputPath: string;
-};
+export type ScriptRunPaths = CommandRunPaths;
 
 export type ScriptRunCore = {
   phaseId: string;
@@ -85,22 +85,9 @@ type ScriptExecutionResult = {
   status: ScriptRunStatus;
 };
 
-export type ScriptPhaseWorkflowState = {
-  issue: IssueReference;
-  workflowPath: string;
-  workflow: NormalizedWorkflow;
-  branchName: string;
-  worktreePath: string;
-  workspaceId: string;
-  currentPhase: string;
-  updatedAt: string;
-  context: Record<string, unknown>;
+export type ScriptPhaseWorkflowState = CommandPhaseWorkflowState & {
   scriptRuns: Record<string, ScriptRunState>;
 };
-
-function ensureDir(path: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-}
 
 function requireString(value: unknown, field: string): string {
   const stringValue = optionalTrimmedString(value);
@@ -236,121 +223,24 @@ export function normalizeScriptRunMap(value: unknown): Record<string, ScriptRunS
   return result;
 }
 
-export function buildScriptRunId(issue: IssueReference, phaseId: string): string {
+function buildScriptRunId(issue: CommandPhaseWorkflowState['issue'], phaseId: string): string {
   return `${issue.number === null ? 'issue-bootstrap' : `issue-${issue.number}`}-${phaseId}-script`;
 }
 
 function scriptRunPathsFor(worktreePath: string, runId: string): ScriptRunPaths {
-  const basePath = join(worktreePath, '.agent', 'runs', runId);
-  return {
-    stdoutPath: join(basePath, 'stdout.log'),
-    stderrPath: join(basePath, 'stderr.log'),
-    rawOutputPath: join(basePath, 'raw.log'),
-  };
+  return buildCommandRunPaths(worktreePath, runId);
 }
 
 function scriptPhaseRunnerPath(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), 'script-phase-runner.ts');
 }
 
-export function resolveScriptCommandPath(cwd: string, workflowPath: string, command: string): string {
-  const trimmed = command.trim();
-  if (!trimmed) {
-    throw new Error('script command must be a non-empty string');
-  }
-
-  if (resolve(trimmed) === trimmed && existsSync(trimmed)) {
-    return trimmed;
-  }
-
-  const workflowDir = dirname(resolve(workflowPath));
-  const workflowRoot = dirname(workflowDir);
-  const scriptRoot = resolve(cwd, 'skills/herdr-implement');
-  const searchRoots = [workflowDir, workflowRoot, cwd, scriptRoot];
-
-  for (const root of searchRoots) {
-    const candidate = resolve(root, trimmed);
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  throw new Error(`script command does not exist: ${command}`);
-}
-
-function flattenContextValues(context: Record<string, unknown>, prefix = 'context'): Record<string, string> {
-  const values: Record<string, string> = {};
-
-  for (const [key, value] of Object.entries(context)) {
-    const renderedKey = `${prefix}.${key}`;
-    if (typeof value === 'string') {
-      values[renderedKey] = value;
-      continue;
-    }
-
-    if (typeof value === 'number' || typeof value === 'boolean') {
-      values[renderedKey] = String(value);
-      continue;
-    }
-
-    if (isRecord(value)) {
-      Object.assign(values, flattenContextValues(value, renderedKey));
-    }
-  }
-
-  return values;
-}
-
-function renderScriptTemplate(source: string, state: ScriptPhaseWorkflowState, phaseId: string): string {
-  const phase = state.workflow.phases[phaseId];
-  return renderTemplate(source, {
-    ...flattenContextValues(state.context),
-    'issue.canonical': state.issue.canonical,
-    'issue.input': state.issue.input,
-    'issue.number': String(state.issue.number ?? ''),
-    'phase.id': phaseId,
-    'phase.type': phase?.type ?? '',
-    'run.id': buildScriptRunId(state.issue, phaseId),
-    'workflow.branchName': state.branchName,
-    'workflow.currentPhase': state.currentPhase,
-    'workflow.path': state.workflowPath,
-    'workflow.workspaceId': state.workspaceId,
-    worktreePath: state.worktreePath,
-    workspaceId: state.workspaceId,
-  });
-}
-
-export function renderScriptArgs(state: ScriptPhaseWorkflowState, phaseId: string, args: unknown): string[] {
-  if (args === undefined) {
-    return [];
-  }
-
-  if (!Array.isArray(args) || !args.every((value) => typeof value === 'string')) {
-    throw new Error(`phases.${phaseId}.args must be an array of strings`);
-  }
-
-  return args.map((arg) => renderScriptTemplate(arg, state, phaseId));
-}
-
-function requireScriptRecord(value: unknown, field: string): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error(`${field} must be an object`);
-  }
-
-  return value as Record<string, unknown>;
+function renderScriptArgs(state: ScriptPhaseWorkflowState, phaseId: string, args: unknown): string[] {
+  return renderCommandArgs(state, phaseId, args, buildScriptRunId(state.issue, phaseId));
 }
 
 function renderScriptEnv(state: ScriptPhaseWorkflowState, phaseId: string, env: unknown): Record<string, string> {
-  if (env === undefined) {
-    return {};
-  }
-
-  const record = requireScriptRecord(env, `phases.${phaseId}.env`);
-  const rendered: Record<string, string> = {};
-  for (const [key, value] of Object.entries(record)) {
-    rendered[key] = renderScriptTemplate(requireString(value, `phases.${phaseId}.env.${key}`), state, phaseId);
-  }
-  return rendered;
+  return renderCommandEnv(state, phaseId, env, buildScriptRunId(state.issue, phaseId));
 }
 
 function scriptPhaseTimeoutSeconds(phase: NormalizedPhase): number {
@@ -366,55 +256,12 @@ function scriptPhaseRetryable(phase: NormalizedPhase): boolean {
   return phase.retryable === true;
 }
 
-export function buildScriptEnvironment(
+function buildScriptEnvironment(
   state: ScriptPhaseWorkflowState,
   phaseId: string,
   renderedEnv: Record<string, string>,
 ): Record<string, string> {
-  return {
-    PATH: process.env.PATH ?? '/usr/bin:/bin',
-    HOME: process.env.HOME ?? '',
-    TMPDIR: process.env.TMPDIR ?? '/tmp',
-    PWD: state.worktreePath,
-    HERDR_ISSUE_CANONICAL: state.issue.canonical,
-    HERDR_ISSUE_INPUT: state.issue.input,
-    HERDR_ISSUE_NUMBER: String(state.issue.number ?? ''),
-    HERDR_PHASE_ID: phaseId,
-    HERDR_RUN_ID: buildScriptRunId(state.issue, phaseId),
-    HERDR_WORKFLOW_PATH: state.workflowPath,
-    HERDR_WORKFLOW_BRANCH: state.branchName,
-    HERDR_WORKFLOW_CURRENT_PHASE: state.currentPhase,
-    HERDR_WORKSPACE_ID: state.workspaceId,
-    HERDR_WORKTREE_PATH: state.worktreePath,
-    ...renderedEnv,
-  };
-}
-
-export function scriptLogContents(input: ScriptRunLogInput): string {
-  return [
-    `command: ${input.command}`,
-    `resolvedCommandPath: ${input.resolvedCommandPath}`,
-    `cwd: ${input.cwd}`,
-    `timeoutSeconds: ${input.timeoutSeconds}`,
-    `startedAt: ${input.startedAt}`,
-    `finishedAt: ${input.finishedAt}`,
-    `args: ${JSON.stringify(input.args)}`,
-    `env: ${JSON.stringify(input.env)}`,
-    '',
-    '--- stdout ---',
-    input.stdout,
-    '',
-    '--- stderr ---',
-    input.stderr,
-    '',
-  ].join('\n');
-}
-
-export function writeScriptLogFiles(paths: ScriptRunPaths, stdout: string, stderr: string, rawOutput: string): void {
-  ensureDir(paths.stdoutPath);
-  writeFileSync(paths.stdoutPath, stdout, 'utf8');
-  writeFileSync(paths.stderrPath, stderr, 'utf8');
-  writeFileSync(paths.rawOutputPath, rawOutput, 'utf8');
+  return buildCommandEnvironment(state, phaseId, renderedEnv, buildScriptRunId(state.issue, phaseId));
 }
 
 function buildScriptRunState(input: ScriptRunCore & { paths: ScriptRunPaths }): ScriptRunState {
@@ -427,7 +274,7 @@ function buildScriptRunState(input: ScriptRunCore & { paths: ScriptRunPaths }): 
 
 function createScriptFailureRecord(input: ScriptFailureInput): ScriptRunState {
   const stderr = input.stderr ? `${input.stderr}\n${input.message}` : input.message;
-  const rawOutput = scriptLogContents({
+  const rawOutput = commandLogContents({
     command: input.command,
     resolvedCommandPath: input.resolvedCommandPath,
     args: input.args,
@@ -439,7 +286,7 @@ function createScriptFailureRecord(input: ScriptFailureInput): ScriptRunState {
     stdout: input.stdout,
     stderr,
   });
-  writeScriptLogFiles(input.paths, input.stdout, stderr, rawOutput);
+  writeCommandLogFiles(input.paths, input.stdout, stderr, rawOutput);
 
   return buildScriptRunState({
     phaseId: input.phaseId,
@@ -466,43 +313,8 @@ function createScriptFailureRecord(input: ScriptFailureInput): ScriptRunState {
   });
 }
 
-export function parseScriptOutcome(stdout: string): { outcome: string; capture: Record<string, unknown> | null } {
-  const trimmed = stdout.trim();
-  if (trimmed === '') {
-    return { outcome: '', capture: null };
-  }
-
-  if (trimmed.startsWith('{')) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed) as unknown;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`script stdout is not valid JSON: ${message}`);
-    }
-
-    if (!isRecord(parsed)) {
-      throw new Error('script stdout JSON outcome must be an object');
-    }
-
-    const outcome = optionalTrimmedString(parsed.outcome);
-    if (!outcome) {
-      throw new Error('script stdout JSON outcome must include a non-empty outcome');
-    }
-
-    const capture = parsed.capture === undefined ? null : normalizeCapture(parsed.capture);
-    if (parsed.capture !== undefined && capture === null) {
-      throw new Error('script stdout capture must be an object with string keys');
-    }
-
-    return { outcome, capture };
-  }
-
-  if (/\s/.test(trimmed)) {
-    throw new Error('script stdout outcome must be a single token or JSON object');
-  }
-
-  return { outcome: trimmed, capture: null };
+function parseScriptOutcome(stdout: string): { outcome: string; capture: Record<string, unknown> | null } {
+  return parseCommandOutcome(stdout);
 }
 
 function scriptExecutionStatusFrom(outcome: string, exitCode: number | null, timedOut: boolean): ScriptExecutionResult['status'] {
@@ -551,9 +363,9 @@ export function executeScriptPhase(
   let env: Record<string, string>;
 
   try {
-    resolvedCommandPath = resolveScriptCommandPath(state.worktreePath, state.workflowPath, command);
+    resolvedCommandPath = resolveCommandPath(state.worktreePath, state.workflowPath, command);
     args = renderScriptArgs(state, phaseId, phase.args);
-    cwd = renderScriptTemplate(typeof phase.cwd === 'string' ? phase.cwd : state.worktreePath, state, phaseId);
+    cwd = renderCommandTemplate(typeof phase.cwd === 'string' ? phase.cwd : state.worktreePath, state, phaseId, runId);
     env = buildScriptEnvironment(state, phaseId, renderScriptEnv(state, phaseId, phase.env));
   } catch (error) {
     const finishedAt = new Date().toISOString();
@@ -566,7 +378,7 @@ export function executeScriptPhase(
       resolvedCommandPath: command,
       args: [],
       cwd: state.worktreePath,
-      env: buildScriptEnvironment(state, phaseId, {}),
+      env: buildCommandEnvironment(state, phaseId, {}, runId),
       timeoutSeconds,
       startedAt,
       finishedAt,
@@ -809,7 +621,7 @@ export function executeScriptPhase(
 
   const outcome = timedOut ? 'timeout' : parsedOutcome.outcome || (exitCode === 0 ? 'success' : 'failure');
   const status = scriptExecutionStatusFrom(outcome, exitCode, timedOut);
-  const rawOutput = scriptLogContents({
+  const rawOutput = commandLogContents({
     command,
     resolvedCommandPath,
     args,
@@ -821,7 +633,7 @@ export function executeScriptPhase(
     stdout,
     stderr,
   });
-  writeScriptLogFiles(paths, stdout, stderr, rawOutput);
+  writeCommandLogFiles(paths, stdout, stderr, rawOutput);
   const record = buildScriptRunState({
     phaseId,
     runId,

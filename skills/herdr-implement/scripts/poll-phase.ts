@@ -1,20 +1,18 @@
 import { spawnSync } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import type { NormalizedPhase } from './workflow.ts';
 import { mergeCaptureIntoContext } from './capture.ts';
 import { resolveNextPhase } from './workflow-transition.ts';
 import {
-  buildScriptEnvironment,
-  parseScriptOutcome,
-  renderScriptArgs,
-  resolveScriptCommandPath,
-  scriptLogContents,
-  writeScriptLogFiles,
-} from './script-phase.ts';
-import {
-  optionalFiniteNumber,
-  optionalTrimmedString,
-} from './validation.ts';
+  buildCommandEnvironment,
+  buildCommandRunPaths,
+  commandLogContents,
+  parseCommandOutcome,
+  renderCommandArgs,
+  resolveCommandPath,
+  writeCommandLogFiles,
+} from './command-phase.ts';
+import { optionalFiniteNumber, optionalTrimmedString } from './validation.ts';
 import type { DaemonStepResult } from './runtime.ts';
 import type { PollRunState, WorkflowRunState } from './workflow-state-store.ts';
 
@@ -37,15 +35,6 @@ function nowIso(now: () => Date): string {
 
 function buildPollRunId(issueNumber: number | null, phaseId: string): string {
   return `${issueNumber === null ? 'issue-bootstrap' : `issue-${issueNumber}`}-${phaseId}-poll`;
-}
-
-function pollRunPathsFor(worktreePath: string, runId: string): { stdoutPath: string; stderrPath: string; rawOutputPath: string } {
-  const basePath = join(worktreePath, '.agent', 'runs', runId);
-  return {
-    stdoutPath: join(basePath, 'stdout.log'),
-    stderrPath: join(basePath, 'stderr.log'),
-    rawOutputPath: join(basePath, 'raw.log'),
-  };
 }
 
 function requireString(value: unknown, field: string): string {
@@ -183,7 +172,7 @@ function createPollFailureRecord(input: {
   paths: { stdoutPath: string; stderrPath: string; rawOutputPath: string };
 }): PollRunState {
   const stderr = input.stderr ? `${input.stderr}\n${input.message}` : input.message;
-  const rawOutput = scriptLogContents({
+  const rawOutput = commandLogContents({
     command: input.command,
     resolvedCommandPath: input.resolvedCommandPath,
     args: input.args,
@@ -195,7 +184,7 @@ function createPollFailureRecord(input: {
     stdout: input.stdout,
     stderr,
   });
-  writeScriptLogFiles(input.paths, input.stdout, stderr, rawOutput);
+  writeCommandLogFiles(input.paths, input.stdout, stderr, rawOutput);
 
   return createPollRunState({
     phaseId: input.phaseId,
@@ -257,7 +246,7 @@ export function advancePollWorkOnce(options: PollPhaseOptions): PollPhaseResult 
   const startedAt = nowIsoValue;
   const createdAt = record?.createdAt ?? startedAt;
   const tickCount = (record?.tickCount ?? 0) + 1;
-  const paths = pollRunPathsFor(state.worktreePath, runId);
+  const paths = buildCommandRunPaths(state.worktreePath, runId);
 
   let resolvedCommandPath: string;
   let args: string[];
@@ -265,8 +254,8 @@ export function advancePollWorkOnce(options: PollPhaseOptions): PollPhaseResult 
   let env: Record<string, string>;
 
   try {
-    resolvedCommandPath = resolveScriptCommandPath(commandCwd, state.workflowPath, command);
-    args = renderScriptArgs(
+    resolvedCommandPath = resolveCommandPath(commandCwd, state.workflowPath, command);
+    args = renderCommandArgs(
       {
         issue: state.issue,
         workflowPath: state.workflowPath,
@@ -277,13 +266,13 @@ export function advancePollWorkOnce(options: PollPhaseOptions): PollPhaseResult 
         currentPhase: state.currentPhase,
         updatedAt: state.updatedAt,
         context: state.context,
-        scriptRuns: state.scriptRuns,
       },
       phaseId,
       phase.args,
+      runId,
     );
     cwd = commandCwd;
-    env = buildScriptEnvironment(
+    env = buildCommandEnvironment(
       {
         issue: state.issue,
         workflowPath: state.workflowPath,
@@ -294,10 +283,10 @@ export function advancePollWorkOnce(options: PollPhaseOptions): PollPhaseResult 
         currentPhase: state.currentPhase,
         updatedAt: state.updatedAt,
         context: state.context,
-        scriptRuns: state.scriptRuns,
       },
       phaseId,
       {},
+      runId,
     );
   } catch (error) {
     const finishedAt = nowIso(now);
@@ -312,7 +301,7 @@ export function advancePollWorkOnce(options: PollPhaseOptions): PollPhaseResult 
       resolvedCommandPath: command,
       args: [],
       cwd: state.worktreePath,
-      env: buildScriptEnvironment({
+      env: buildCommandEnvironment({
         issue: state.issue,
         workflowPath: state.workflowPath,
         workflow: state.workflow,
@@ -322,8 +311,7 @@ export function advancePollWorkOnce(options: PollPhaseOptions): PollPhaseResult 
         currentPhase: state.currentPhase,
         updatedAt: state.updatedAt,
         context: state.context,
-        scriptRuns: state.scriptRuns,
-      }, phaseId, {}),
+      }, phaseId, {}, runId),
       intervalSeconds,
       timeoutSeconds,
       createdAt,
@@ -436,7 +424,7 @@ export function advancePollWorkOnce(options: PollPhaseOptions): PollPhaseResult 
 
   let parsedOutcome: { outcome: string; capture: Record<string, unknown> | null };
   try {
-    parsedOutcome = parseScriptOutcome(helperStdout);
+    parsedOutcome = parseCommandOutcome(helperStdout);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const run = createPollFailureRecord({
@@ -488,7 +476,7 @@ export function advancePollWorkOnce(options: PollPhaseOptions): PollPhaseResult 
 
   const outcome = timedOut ? 'timeout' : parsedOutcome.outcome || (exitCode === 0 ? 'waiting' : 'failure');
   const status = pollStatusFrom(outcome, timedOut);
-  const rawOutput = scriptLogContents({
+  const rawOutput = commandLogContents({
     command,
     resolvedCommandPath,
     args,
@@ -500,7 +488,7 @@ export function advancePollWorkOnce(options: PollPhaseOptions): PollPhaseResult 
     stdout: helperStdout,
     stderr: helperStderr,
   });
-  writeScriptLogFiles(paths, helperStdout, helperStderr, rawOutput);
+  writeCommandLogFiles(paths, helperStdout, helperStderr, rawOutput);
 
   const run = createPollRunState({
     phaseId,
