@@ -53,14 +53,20 @@ All completion artifacts use the same envelope:
     "changedFiles": ["skills/herdr-worktree-flow/SKILL.md"],
     "checksRun": ["node --test skills/herdr-worktree-flow/scripts/*.test.ts"],
     "checksDeferred": [],
-    "blockers": []
+    "blockers": [],
+    "architectureNotes": [
+      "Reviewed ADR-0001 through ADR-0004 before changing the workflow docs."
+    ],
+    "reuseNotes": [
+      "Reused the existing issue brief template and completion contract instead of inventing a new workflow path."
+    ]
   }
 }
 ```
 
 Allowed `status` values are `complete`, `blocked`, and `failed`.
 
-Implementer results should include changed files, a summary, checks run or deferred with reasons, and blockers when present. Reviewer results should include the review verdict, findings grouped by severity, whether Block or Major findings exist, and the review scope.
+Implementer results should include changed files, a summary, checks run or deferred with reasons, blockers when present, and architecture/reuse notes covering reused modules, intentionally not reused modules, new seams, and seam-bypass risks. Reviewer results should include the review verdict, findings grouped by severity, whether Block or Major findings exist, the review scope, and any DRY or deep-module concerns that surfaced.
 
 ## Orchestrator Validation
 
@@ -73,6 +79,8 @@ When the issue orchestrator receives a completion notification, it must validate
 5. The role-specific evidence needed for the current run is present.
 
 The orchestrator may inspect the artifact or the worktree once for verification. It should not rely on Herdr agent-state polling as the normal completion mechanism.
+
+For implementation runs, role-specific evidence includes the architecture/reuse notes mentioned above. For review runs, role-specific evidence includes whether the DRY/deep-module check found duplicated behavior, widened interfaces, exported internals, or a need for a new shared module.
 
 ## Lifecycle And Recovery
 

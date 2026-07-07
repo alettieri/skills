@@ -9,6 +9,7 @@ Use this as the canonical handoff document the main orchestrator writes into the
 - Worktree path and branch name
 - Post-worktree setup status, hook path, and setup log path
 - Goal summary
+- Architecture fit notes
 - Acceptance criteria
 - Constraints and non-goals
 - Launch policy and model selection
@@ -36,6 +37,14 @@ Post-worktree setup:
 Goal:
 <one short paragraph>
 
+Architecture fit:
+- Relevant ADRs reviewed:
+- Existing modules/seams/helpers reused:
+- Existing modules intentionally not reused and why:
+- New seams introduced, if any:
+- ADR-owned seams that must not be bypassed or wrapped incorrectly:
+- Notes on acceptable reuse through public surfaces versus forbidden seam bypassing:
+
 Acceptance criteria:
 - <criterion 1>
 - <criterion 2>
@@ -58,6 +67,7 @@ Completion contract:
 - Delegated implementer and review runs must invoke `node skills/herdr-worktree-flow/scripts/agent-run-complete.ts --run-id <runId> --role <implementer|reviewer> --phase <phase> --result <resultPath> --notify-target <notifyTarget>` after writing the artifact.
 - The issue orchestrator uses the artifact plus the utility-delivered `AGENT_RUN_COMPLETE <runId> <resultPath>` instead of normal agent-state polling.
 - The orchestrator validates `runId`, `role`, `phase`, `status`, and role-specific evidence before advancing lifecycle state.
+- Implementer result artifacts or lifecycle logs must also record the architecture-fit notes from the run.
 - Direct manual `AGENT_RUN_COMPLETE` messages are legacy/manual recovery only.
 
 Current state:
