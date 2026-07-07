@@ -253,7 +253,7 @@ function scriptPhaseRunnerPath(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), 'script-phase-runner.ts');
 }
 
-function resolveScriptCommandPath(cwd: string, workflowPath: string, command: string): string {
+export function resolveScriptCommandPath(cwd: string, workflowPath: string, command: string): string {
   const trimmed = command.trim();
   if (!trimmed) {
     throw new Error('script command must be a non-empty string');
@@ -320,7 +320,7 @@ function renderScriptTemplate(source: string, state: ScriptPhaseWorkflowState, p
   });
 }
 
-function renderScriptArgs(state: ScriptPhaseWorkflowState, phaseId: string, args: unknown): string[] {
+export function renderScriptArgs(state: ScriptPhaseWorkflowState, phaseId: string, args: unknown): string[] {
   if (args === undefined) {
     return [];
   }
@@ -366,7 +366,7 @@ function scriptPhaseRetryable(phase: NormalizedPhase): boolean {
   return phase.retryable === true;
 }
 
-function buildScriptEnvironment(
+export function buildScriptEnvironment(
   state: ScriptPhaseWorkflowState,
   phaseId: string,
   renderedEnv: Record<string, string>,
@@ -390,7 +390,7 @@ function buildScriptEnvironment(
   };
 }
 
-function scriptLogContents(input: ScriptRunLogInput): string {
+export function scriptLogContents(input: ScriptRunLogInput): string {
   return [
     `command: ${input.command}`,
     `resolvedCommandPath: ${input.resolvedCommandPath}`,
@@ -410,7 +410,7 @@ function scriptLogContents(input: ScriptRunLogInput): string {
   ].join('\n');
 }
 
-function writeScriptLogFiles(paths: ScriptRunPaths, stdout: string, stderr: string, rawOutput: string): void {
+export function writeScriptLogFiles(paths: ScriptRunPaths, stdout: string, stderr: string, rawOutput: string): void {
   ensureDir(paths.stdoutPath);
   writeFileSync(paths.stdoutPath, stdout, 'utf8');
   writeFileSync(paths.stderrPath, stderr, 'utf8');
@@ -466,7 +466,7 @@ function createScriptFailureRecord(input: ScriptFailureInput): ScriptRunState {
   });
 }
 
-function parseScriptOutcome(stdout: string): { outcome: string; capture: Record<string, unknown> | null } {
+export function parseScriptOutcome(stdout: string): { outcome: string; capture: Record<string, unknown> | null } {
   const trimmed = stdout.trim();
   if (trimmed === '') {
     return { outcome: '', capture: null };

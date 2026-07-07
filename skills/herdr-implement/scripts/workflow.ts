@@ -133,6 +133,12 @@ function normalizePhases(phaseEntries: Record<string, unknown>): Record<string, 
     if (phase.type === 'agent' && !promptTemplate) {
       throw new WorkflowValidationError(`phase ${phaseName} must define promptTemplate`);
     }
+    if (phase.type === 'poll') {
+      requireString(phase.command, `phases.${phaseName}.command`);
+      requirePositiveNumber(phase.intervalSeconds, `phases.${phaseName}.intervalSeconds`);
+      optionalPositiveNumber(phase.timeoutSeconds, `phases.${phaseName}.timeoutSeconds`);
+      optionalStringArray(phase.args, `phases.${phaseName}.args`);
+    }
 
     phases[phaseName] = {
       ...phase,
@@ -143,6 +149,35 @@ function normalizePhases(phaseEntries: Record<string, unknown>): Record<string, 
   }
 
   return phases;
+}
+
+function optionalStringArray(value: unknown, field: string): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === 'string')) {
+    throw new WorkflowValidationError(`${field} must be an array of strings`);
+  }
+
+  return value;
+}
+
+function requirePositiveNumber(value: unknown, field: string): number {
+  const numericValue = optionalFiniteNumber(value);
+  if (numericValue === null || numericValue <= 0) {
+    throw new WorkflowValidationError(`${field} must be a positive number`);
+  }
+
+  return numericValue;
+}
+
+function optionalPositiveNumber(value: unknown, field: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return requirePositiveNumber(value, field);
 }
 
 function validateReferences(

@@ -5,6 +5,7 @@ import { normalizeScriptRunMap, type ScriptRunState } from './script-phase.ts';
 import type { NormalizedWorkflow } from './workflow.ts';
 import {
   isRecord,
+  optionalBoolean,
   optionalFiniteNumber,
   optionalTrimmedString,
 } from './validation.ts';
@@ -56,6 +57,39 @@ export type AcceptedAgentRunState = {
   capture: Record<string, unknown> | null;
 };
 
+export type PollRunStatus = 'waiting' | 'complete' | 'blocked' | 'failed' | 'timeout';
+
+export type PollRunState = {
+  runId: string;
+  phaseId: string;
+  command: string;
+  resolvedCommandPath: string;
+  args: string[];
+  cwd: string;
+  env: Record<string, string>;
+  intervalSeconds: number;
+  timeoutSeconds: number;
+  createdAt: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  nextWakeAt: string;
+  tickCount: number;
+  timedOut: boolean;
+  exitCode: number | null;
+  signal: string | null;
+  status: PollRunStatus;
+  outcome: string;
+  capture: Record<string, unknown> | null;
+  observation: Record<string, unknown> | null;
+  fingerprint: string;
+  stdout: string;
+  stderr: string;
+  stdoutPath: string;
+  stderrPath: string;
+  rawOutputPath: string;
+};
+
 export type RoleAgentState = {
   roleId: string;
   roleLabel: string;
@@ -94,6 +128,7 @@ export type WorkflowRunState = {
   pendingAgentRun: PendingAgentRunState | null;
   acceptedAgentRuns: Record<string, AcceptedAgentRunState>;
   scriptRuns: Record<string, ScriptRunState>;
+  pollRuns?: Record<string, PollRunState>;
   createdAt: string;
   updatedAt: string;
   daemonHandlePath: string;
@@ -124,6 +159,22 @@ function writeJsonFile(path: string, value: unknown): void {
 
 function completionRoleFor(roleId: string): 'implementer' | 'reviewer' {
   return roleId === 'reviewer' ? 'reviewer' : 'implementer';
+}
+
+function normalizeStringRecord(value: unknown): Record<string, string> | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const result: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof key !== 'string' || typeof entry !== 'string') {
+      return null;
+    }
+    result[key] = entry;
+  }
+
+  return result;
 }
 
 export function workflowStatePathsFor(worktreePath: string): { runStatePath: string; handleStatePath: string } {
@@ -241,6 +292,132 @@ export function normalizeAcceptedAgentRunMap(value: unknown): Record<string, Acc
   return result;
 }
 
+export function normalizePollRun(value: unknown): PollRunState | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const runId = optionalTrimmedString(value.runId);
+  const phaseId = optionalTrimmedString(value.phaseId);
+  const command = optionalTrimmedString(value.command);
+  const resolvedCommandPath = optionalTrimmedString(value.resolvedCommandPath);
+  const args = Array.isArray(value.args) && value.args.every((item) => typeof item === 'string') ? value.args : null;
+  const cwd = optionalTrimmedString(value.cwd);
+  const env = normalizeStringRecord(value.env);
+  const intervalSeconds = optionalFiniteNumber(value.intervalSeconds);
+  const timeoutSeconds = optionalFiniteNumber(value.timeoutSeconds);
+  const createdAt = optionalTrimmedString(value.createdAt);
+  const startedAt = optionalTrimmedString(value.startedAt);
+  const finishedAt = optionalTrimmedString(value.finishedAt);
+  const durationMs = optionalFiniteNumber(value.durationMs);
+  const nextWakeAt = optionalTrimmedString(value.nextWakeAt);
+  const tickCount = optionalFiniteNumber(value.tickCount);
+  const timedOut = optionalBoolean(value.timedOut);
+  const exitCode =
+    value.exitCode === undefined
+      ? undefined
+      : value.exitCode === null
+        ? null
+        : typeof value.exitCode === 'number' && Number.isFinite(value.exitCode)
+          ? value.exitCode
+          : undefined;
+  const signal = value.signal === null ? null : optionalTrimmedString(value.signal);
+  const status =
+    value.status === 'waiting' ||
+    value.status === 'complete' ||
+    value.status === 'blocked' ||
+    value.status === 'failed' ||
+    value.status === 'timeout'
+      ? value.status
+      : null;
+  const outcome = optionalTrimmedString(value.outcome);
+  const capture = value.capture === undefined ? null : normalizeCapture(value.capture);
+  const observation = value.observation === undefined ? null : normalizeCapture(value.observation);
+  const fingerprint = optionalTrimmedString(value.fingerprint);
+  const stdout = typeof value.stdout === 'string' ? value.stdout : null;
+  const stderr = typeof value.stderr === 'string' ? value.stderr : null;
+  const stdoutPath = optionalTrimmedString(value.stdoutPath);
+  const stderrPath = optionalTrimmedString(value.stderrPath);
+  const rawOutputPath = optionalTrimmedString(value.rawOutputPath);
+
+  if (
+    !runId ||
+    !phaseId ||
+    !command ||
+    !resolvedCommandPath ||
+    !args ||
+    !cwd ||
+    !env ||
+    intervalSeconds === null ||
+    timeoutSeconds === null ||
+    !createdAt ||
+    !startedAt ||
+    !finishedAt ||
+    durationMs === null ||
+    !nextWakeAt ||
+    tickCount === null ||
+    timedOut === null ||
+    exitCode === undefined ||
+    !status ||
+    !outcome ||
+    stdout === null ||
+    stderr === null ||
+    !stdoutPath ||
+    !stderrPath ||
+    !rawOutputPath ||
+    !fingerprint
+  ) {
+    return null;
+  }
+
+  return {
+    runId,
+    phaseId,
+    command,
+    resolvedCommandPath,
+    args,
+    cwd,
+    env,
+    intervalSeconds,
+    timeoutSeconds,
+    createdAt,
+    startedAt,
+    finishedAt,
+    durationMs,
+    nextWakeAt,
+    tickCount,
+    timedOut,
+    exitCode: exitCode ?? null,
+    signal,
+    status,
+    outcome,
+    capture,
+    observation,
+    fingerprint,
+    stdout,
+    stderr,
+    stdoutPath,
+    stderrPath,
+    rawOutputPath,
+  };
+}
+
+export function normalizePollRunMap(value: unknown): Record<string, PollRunState> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const result: Record<string, PollRunState> = {};
+  for (const [phaseId, record] of Object.entries(value)) {
+    const normalized = normalizePollRun(record);
+    if (normalized) {
+      result[phaseId] = normalized;
+    }
+  }
+
+  return result;
+}
+
 export function normalizeRoleAgentMap(value: unknown): Record<string, RoleAgentState> {
   if (!isRecord(value)) {
     return {};
@@ -286,6 +463,7 @@ export function normalizeWorkflowRunState(value: Record<string, unknown>): Workf
     pendingAgentRun: normalizePendingAgentRun(value.pendingAgentRun),
     acceptedAgentRuns: normalizeAcceptedAgentRunMap(value.acceptedAgentRuns),
     scriptRuns: normalizeScriptRunMap(value.scriptRuns),
+    pollRuns: normalizePollRunMap(value.pollRuns),
     context,
   };
 }

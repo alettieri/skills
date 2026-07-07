@@ -136,11 +136,15 @@ phases:
   await_review:
     type: poll
     command: scripts/check-pr-review.sh
+    args:
+      - '{{ context.pr_url }}'
+      - '{{ context.pr_number }}'
     intervalSeconds: 60
     on:
       approved: await_merge
       changes_requested: handle_pr_feedback
       checks_failed: handle_pr_feedback
+      feedback: handle_pr_feedback
       waiting: await_review
       closed: pr_closed
       timeout: blocked
@@ -159,6 +163,9 @@ phases:
   await_merge:
     type: poll
     command: scripts/check-pr-merged.sh
+    args:
+      - '{{ context.pr_url }}'
+      - '{{ context.pr_number }}'
     intervalSeconds: 60
     on:
       merged: cleanup

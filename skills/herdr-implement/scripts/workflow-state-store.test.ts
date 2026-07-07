@@ -60,6 +60,7 @@ function makeWorkflowRunState(worktreePath: string): WorkflowRunState {
     pendingAgentRun: null,
     acceptedAgentRuns: {},
     scriptRuns: {},
+    pollRuns: {},
     createdAt: '2026-07-05T00:00:00.000Z',
     updatedAt: '2026-07-05T00:00:00.000Z',
     daemonHandlePath: join(worktreePath, DAEMON_HANDLE_STATE_PATH),
@@ -215,6 +216,7 @@ test('readWorkflowRunState normalizes compatibility fields, context defaults, an
   assert.equal(state?.acceptedAgentRuns['issue-7-implement-implementer-0']?.summary, 'done');
   assert.equal(state?.scriptRuns.setup.outcome, 'success');
   assert.equal(state?.scriptRuns.setup.capture?.greeting, 'hello');
+  assert.deepEqual(state?.pollRuns, {});
 });
 
 test('readWorkflowRunState rejects persisted script runs with invalid non-null exit codes', () => {
@@ -269,6 +271,7 @@ test('readWorkflowRunState rejects persisted script runs with invalid non-null e
         rawOutputPath: join(worktreePath, '.agent/runs/issue-7-setup-script/raw.log'),
       },
     },
+    pollRuns: {},
     createdAt: '2026-07-05T00:00:00.000Z',
     updatedAt: '2026-07-05T00:00:00.000Z',
     daemonHandlePath: join(worktreePath, DAEMON_HANDLE_STATE_PATH),
