@@ -10,8 +10,8 @@ import {
   readDaemonHandleState,
   readWorkflowRunState,
   type DaemonStepResult,
-} from './runtime.ts';
-import type { HerdrAdapter, HerdrAgentInfo, HerdrPaneInfo, RepositoryInfo, WorktreeInfo } from './herdr-adapter.ts';
+} from '../src/runtime.ts';
+import type { HerdrAdapter, HerdrAgentInfo, HerdrPaneInfo, RepositoryInfo, WorktreeInfo } from '../src/herdr-adapter.ts';
 
 type AgentPlan = {
   outcome: string;
@@ -288,7 +288,7 @@ async function makeScenario(options: ScenarioOptions): Promise<{
   git(repo, ['config', 'user.name', 'Test User']);
   writeFileSync(join(repo, 'README.md'), 'fixture\n', 'utf8');
   mkdirSync(join(repo, '.agent/prompts'), { recursive: true });
-  mkdirSync(join(repo, '.agent/scripts'), { recursive: true });
+  mkdirSync(join(repo, '.agent/workflow-scripts'), { recursive: true });
   writeFileSync(
     join(repo, '.agent/herdr-workflow.yaml'),
     readFileSync(join(process.cwd(), 'skills/herdr-implement/workflows/default.yaml'), 'utf8'),
@@ -330,7 +330,7 @@ function installScripts(repo: string, options: ScenarioOptions): void {
 }
 
 function writeScript(repo: string, name: string, body: string): void {
-  const path = join(repo, '.agent/scripts', name);
+  const path = join(repo, '.agent/workflow-scripts', name);
   writeFileSync(path, body, 'utf8');
   chmodSync(path, 0o755);
 }

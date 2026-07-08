@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-import { loadWorkflow, normalizeWorkflow, WorkflowValidationError } from './workflow.ts';
-import { resolveNextPhase } from './workflow-transition.ts';
+import { loadWorkflow, normalizeWorkflow, WorkflowValidationError } from '../src/workflow.ts';
+import { resolveNextPhase } from '../src/workflow-transition.ts';
 
 test('loads the default workflow', () => {
   const source = loadWorkflow();
@@ -283,7 +283,7 @@ test('poll phases require a command, interval, and string args', () => {
         phases: {
           poll: {
             type: 'poll',
-            command: 'scripts/check-pr-review.sh',
+            command: 'workflow-scripts/check-pr-review.sh',
             intervalSeconds: 0,
             on: { waiting: 'poll' },
           },
@@ -303,7 +303,7 @@ test('poll phases require a command, interval, and string args', () => {
         phases: {
           poll: {
             type: 'poll',
-            command: 'scripts/check-pr-review.sh',
+            command: 'workflow-scripts/check-pr-review.sh',
             args: [1],
             intervalSeconds: 30,
             on: { waiting: 'poll' },
@@ -341,7 +341,7 @@ test('validation errors use the workflow validation error type', () => {
 });
 
 test('dry-run requires an issue number or GitHub issue URL', () => {
-  const result = spawnSync(process.execPath, ['skills/herdr-implement/scripts/dry-run.ts', '--issue', 'not-an-issue'], {
+  const result = spawnSync(process.execPath, ['skills/herdr-implement/bin/dry-run.ts', '--issue', 'not-an-issue'], {
     cwd: process.cwd(),
     encoding: 'utf8',
   });
@@ -351,7 +351,7 @@ test('dry-run requires an issue number or GitHub issue URL', () => {
 });
 
 test('dry-run prints selected workflow details and transition graph', () => {
-  const result = spawnSync(process.execPath, ['skills/herdr-implement/scripts/dry-run.ts', '--issue', '#15'], {
+  const result = spawnSync(process.execPath, ['skills/herdr-implement/bin/dry-run.ts', '--issue', '#15'], {
     cwd: process.cwd(),
     encoding: 'utf8',
   });
@@ -383,7 +383,7 @@ test('dry-run rejects malformed project workflow before side effects', async () 
     'utf8',
   );
 
-  const result = spawnSync(process.execPath, [join(process.cwd(), 'skills/herdr-implement/scripts/dry-run.ts'), '--issue', '15'], {
+  const result = spawnSync(process.execPath, [join(process.cwd(), 'skills/herdr-implement/bin/dry-run.ts'), '--issue', '15'], {
     cwd,
     encoding: 'utf8',
   });

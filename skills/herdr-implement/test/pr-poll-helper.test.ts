@@ -57,7 +57,7 @@ esac
 
   const result = spawnSync(
     process.execPath,
-    ['skills/herdr-implement/scripts/pr-poll-helper.mjs', 'review', '42'],
+    ['skills/herdr-implement/src/pr-poll-helper.mjs', 'review', '42'],
     {
       cwd: process.cwd(),
       encoding: 'utf8',

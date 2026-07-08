@@ -36,7 +36,7 @@ Runtime keeps daemon-level phase routing, script phases, terminal phases, bootst
 - Rejected for order: result artifacts became the next slice after lifecycle.
 
 ## Consequences
-- Agent lifecycle behavior belongs in `skills/herdr-implement/scripts/agent-lifecycle.ts`.
+- Agent lifecycle behavior belongs in `skills/herdr-implement/src/agent-lifecycle.ts`.
 - Runtime should delegate Agent phases and pending Agent runs to the lifecycle module.
 - Runtime tests should prove daemon integration; lifecycle tests should prove Agent behavior.
 - The Herdr adapter remains the only module that knows Herdr command shapes.

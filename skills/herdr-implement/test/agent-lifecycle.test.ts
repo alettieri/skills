@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
-import { advanceAgentWorkOnce, type AgentLifecycleOptions } from './agent-lifecycle.ts';
-import type { HerdrAdapter } from './herdr-adapter.ts';
-import { normalizeWorkflow } from './workflow.ts';
-import type { DaemonHandleState, WorkflowRunState } from './runtime.ts';
+import { advanceAgentWorkOnce, type AgentLifecycleOptions } from '../src/agent-lifecycle.ts';
+import type { HerdrAdapter } from '../src/herdr-adapter.ts';
+import { normalizeWorkflow } from '../src/workflow.ts';
+import type { DaemonHandleState, WorkflowRunState } from '../src/runtime.ts';
 
 function workflowFixture(): Record<string, unknown> {
   return {
@@ -88,7 +88,7 @@ function baseHandleState(worktreePath: string): DaemonHandleState {
     worktreePath,
     daemonTabId: null,
     daemonPaneId: null,
-    daemonCommand: 'node skills/herdr-implement/scripts/daemon.ts',
+    daemonCommand: 'node skills/herdr-implement/bin/daemon.ts',
     roleAgents: {},
     createdAt: '2026-07-05T00:00:00.000Z',
     updatedAt: '2026-07-05T00:00:00.000Z',
@@ -250,7 +250,7 @@ test('advanceAgentWorkOnce uses a fresh attempt number when revisiting the same 
         summary: 'second visit blocked',
         capture: { blocker: 'manual intervention' },
         payload: {
-          changedFiles: ['skills/herdr-implement/scripts/agent-lifecycle.ts'],
+          changedFiles: ['skills/herdr-implement/src/agent-lifecycle.ts'],
           checksRun: [],
           checksDeferred: ['follow-up'],
           blockers: ['manual intervention'],
@@ -299,8 +299,8 @@ test('advanceAgentWorkOnce accepts a valid completion artifact and merges captur
         summary: 'done',
         capture: { merged: 'yes' },
         payload: {
-          changedFiles: ['skills/herdr-implement/scripts/agent-lifecycle.ts'],
-          checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+          changedFiles: ['skills/herdr-implement/src/agent-lifecycle.ts'],
+          checksRun: ['node --test skills/herdr-implement/test/*.test.ts'],
           checksDeferred: [],
           blockers: [],
         },

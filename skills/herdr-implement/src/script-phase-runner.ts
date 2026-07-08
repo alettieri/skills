@@ -33,8 +33,8 @@ type ScriptPhaseRunnerResult =
       errorMessage: string;
     };
 
-function readPayload(): ScriptPhaseRunnerPayload {
-  const raw = process.argv[2];
+function readPayload(argv: string[]): ScriptPhaseRunnerPayload {
+  const raw = argv[2];
   if (!raw) {
     throw new Error('missing script phase payload');
   }
@@ -75,8 +75,7 @@ function readPayload(): ScriptPhaseRunnerPayload {
   };
 }
 
-async function main(): Promise<void> {
-  const payload = readPayload();
+async function runScriptPhase(payload: ScriptPhaseRunnerPayload): Promise<void> {
   const startedAt = new Date().toISOString();
   const startedAtMs = Date.parse(startedAt);
   let timedOut = false;
@@ -179,10 +178,7 @@ async function main(): Promise<void> {
   clearTimeout(timeout);
 }
 
-try {
-  await main();
-} catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`${message}\n`);
-  process.exitCode = 1;
+export async function runScriptPhaseRunner(argv: string[] = process.argv): Promise<void> {
+  const payload = readPayload(argv);
+  await runScriptPhase(payload);
 }

@@ -36,7 +36,7 @@ Agent lifecycle keeps lifecycle policy: dispatching phases, recovering pending r
 - Accepted: this keeps Agent lifecycle focused.
 
 ## Consequences
-- Result artifact behavior belongs in `skills/herdr-implement/scripts/result-artifact.ts`.
+- Result artifact behavior belongs in `skills/herdr-implement/src/result-artifact.ts`.
 - Generic capture helpers can live in `capture.ts` when they are not Agent-specific.
 - Script phase capture handling should remain independent from Agent result artifacts.
 - Existing durable state shapes must remain backward compatible.

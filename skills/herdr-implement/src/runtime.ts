@@ -184,7 +184,7 @@ function normalizeIssueReference(input: string): IssueReference {
 }
 
 function ensureDaemonCommand(worktreePath: string): string {
-  return `node skills/herdr-implement/scripts/daemon.ts --worktree ${JSON.stringify(worktreePath)} --state ${RUN_STATE_PATH} --handles ${HANDLE_STATE_PATH}`;
+  return `node skills/herdr-implement/bin/daemon.ts --worktree ${JSON.stringify(worktreePath)} --state ${RUN_STATE_PATH} --handles ${HANDLE_STATE_PATH}`;
 }
 
 function createWorktreeIfNeeded(

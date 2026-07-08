@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
-import { normalizeWorkflow } from './workflow.ts';
+import { normalizeWorkflow } from '../src/workflow.ts';
 import {
   DAEMON_HANDLE_STATE_PATH,
   WORKFLOW_RUN_STATE_PATH,
@@ -14,7 +14,7 @@ import {
   writeWorkflowRunState,
   type DaemonHandleState,
   type WorkflowRunState,
-} from './workflow-state-store.ts';
+} from '../src/workflow-state-store.ts';
 
 function workflowFixture(): Record<string, unknown> {
   return {
@@ -82,7 +82,7 @@ function makeDaemonHandleState(worktreePath: string): DaemonHandleState {
     worktreePath,
     daemonTabId: null,
     daemonPaneId: null,
-    daemonCommand: 'node skills/herdr-implement/scripts/daemon.ts',
+    daemonCommand: 'node skills/herdr-implement/bin/daemon.ts',
     roleAgents: {},
     createdAt: '2026-07-05T00:00:00.000Z',
     updatedAt: '2026-07-05T00:00:00.000Z',
@@ -198,8 +198,8 @@ test('readWorkflowRunState normalizes compatibility fields, context defaults, an
       setup: {
         phaseId: 'setup',
         runId: 'issue-7-setup-script',
-        command: 'scripts/setup.sh',
-        resolvedCommandPath: join(worktreePath, 'scripts/setup.sh'),
+        command: 'workflow-scripts/setup.sh',
+        resolvedCommandPath: join(worktreePath, '.agent/workflow-scripts/setup.sh'),
         args: ['7'],
         cwd: worktreePath,
         env: {},
@@ -272,8 +272,8 @@ test('readWorkflowRunState rejects persisted script runs with invalid non-null e
       setup: {
         phaseId: 'setup',
         runId: 'issue-7-setup-script',
-        command: 'scripts/setup.sh',
-        resolvedCommandPath: join(worktreePath, 'scripts/setup.sh'),
+        command: 'workflow-scripts/setup.sh',
+        resolvedCommandPath: join(worktreePath, '.agent/workflow-scripts/setup.sh'),
         args: ['7'],
         cwd: worktreePath,
         env: {},
@@ -323,7 +323,7 @@ test('readDaemonHandleState normalizes role agent maps', () => {
     worktreePath,
     daemonTabId: 'tab-1',
     daemonPaneId: 'pane-1',
-    daemonCommand: 'node skills/herdr-implement/scripts/daemon.ts',
+    daemonCommand: 'node skills/herdr-implement/bin/daemon.ts',
     roleAgents: {
       implementer: {
         roleId: 'implementer',

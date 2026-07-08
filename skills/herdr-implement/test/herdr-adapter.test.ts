@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createFakeRunner, createHerdrAdapter, type HerdrCommandResult, type RepositoryInfo } from './herdr-adapter.ts';
+import { createFakeRunner, createHerdrAdapter, type HerdrCommandResult, type RepositoryInfo } from '../src/herdr-adapter.ts';
 
 function createRunner(expectations: Array<{ args: readonly string[]; result: HerdrCommandResult }>) {
   return createFakeRunner(expectations);

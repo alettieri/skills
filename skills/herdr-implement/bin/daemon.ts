@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
-import { daemonStep, printDaemonStep, runDaemonLoop } from './runtime.ts';
-import { WorkflowValidationError } from './workflow.ts';
+import { daemonStep, printDaemonStep, runDaemonLoop } from '../src/runtime.ts';
+import { WorkflowValidationError } from '../src/workflow.ts';
 
 function parseOptions(argv: string[]): { worktreePath?: string; statePath?: string; handleStatePath?: string; once: boolean } {
   const parsed = parseArgs({

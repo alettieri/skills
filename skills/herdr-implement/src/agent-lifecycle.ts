@@ -1,8 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { HerdrAdapter } from './herdr-adapter.ts';
 import type { NormalizedPhase } from './workflow.ts';
 import type { DaemonStepResult } from './runtime.ts';
+import { readPromptTemplateSource } from './asset-resolver.ts';
 import {
   applyAcceptedResultArtifact,
   createAcceptedResultArtifactSummary,
@@ -49,17 +49,7 @@ function requireString(value: unknown, field: string): string {
 }
 
 function readPromptTemplate(cwd: string, workflowPath: string, templateName: string): string {
-  const projectPath = join(dirname(resolve(workflowPath)), 'prompts', templateName);
-  if (existsSync(projectPath)) {
-    return readFileSync(projectPath, 'utf8');
-  }
-
-  const skillPath = resolve(cwd, 'skills/herdr-implement/prompts', templateName);
-  if (existsSync(skillPath)) {
-    return readFileSync(skillPath, 'utf8');
-  }
-
-  throw new Error(`prompt template does not exist: ${templateName}`);
+  return readPromptTemplateSource(cwd, workflowPath, templateName).source;
 }
 
 function renderAgentName(template: string, state: WorkflowRunState, roleId: string): string {

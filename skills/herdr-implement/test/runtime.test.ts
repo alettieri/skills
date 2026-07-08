@@ -12,10 +12,10 @@ import {
   readWorkflowRunState,
   writeDaemonHandleState,
   writeWorkflowRunState,
-} from './runtime.ts';
-import { loadWorkflow, normalizeWorkflow } from './workflow.ts';
-import type { HerdrAdapter } from './herdr-adapter.ts';
-import type { ScriptRunState } from './script-phase.ts';
+} from '../src/runtime.ts';
+import { loadWorkflow, normalizeWorkflow } from '../src/workflow.ts';
+import type { HerdrAdapter } from '../src/herdr-adapter.ts';
+import type { ScriptRunState } from '../src/script-phase.ts';
 
 type HerdrCommandResult = {
   stdout: string;
@@ -197,7 +197,7 @@ function handleStateFixture(worktreePath: string, issueNumber: number, daemonTab
     worktreePath,
     daemonTabId,
     daemonPaneId,
-    daemonCommand: 'node skills/herdr-implement/scripts/daemon.ts',
+    daemonCommand: 'node skills/herdr-implement/bin/daemon.ts',
     roleAgents: {},
     createdAt: '2026-06-30T12:00:00.000Z',
     updatedAt: '2026-06-30T12:00:00.000Z',
@@ -298,7 +298,7 @@ function scriptWorkflowFixture(options?: {
     phases: {
       run_script: {
         type: 'script',
-        command: options?.command ?? 'scripts/run-script.sh',
+        command: options?.command ?? 'workflow-scripts/run-script.sh',
         args: ['{{ issue.number }}', '{{ context.greeting }}', '{{ context.outputPath }}'],
         cwd: '{{ context.customCwd }}',
         env: {
@@ -381,14 +381,14 @@ async function makeScriptWorkflowFixture(
   scriptBody: string,
   workflowOptions?: Parameters<typeof scriptWorkflowFixture>[0],
 ): Promise<void> {
-  await mkdir(join(worktreePath, '.agent/scripts'), { recursive: true });
+  await mkdir(join(worktreePath, '.agent/workflow-scripts'), { recursive: true });
   await mkdir(join(worktreePath, '.agent'), { recursive: true });
   await writeFileSync(
     join(worktreePath, '.agent/herdr-workflow.yaml'),
     JSON.stringify(scriptWorkflowFixture(workflowOptions), null, 2),
     'utf8',
   );
-  const scriptPath = join(worktreePath, '.agent/scripts/run-script.sh');
+  const scriptPath = join(worktreePath, '.agent/workflow-scripts/run-script.sh');
   writeFileSync(scriptPath, scriptBody, 'utf8');
   chmodSync(scriptPath, 0o755);
 }
@@ -534,10 +534,10 @@ function installRecoveryMarkerScripts(worktreePath: string): void {
     { name: 'cleanup-worktree.sh', marker: 'cleanup.ran' },
   ];
 
-  mkdirSync(join(worktreePath, '.agent', 'scripts'), { recursive: true });
+  mkdirSync(join(worktreePath, '.agent', 'workflow-scripts'), { recursive: true });
   for (const script of scripts) {
     writeFileSync(
-      join(worktreePath, '.agent', 'scripts', script.name),
+      join(worktreePath, '.agent', 'workflow-scripts', script.name),
       `#!/usr/bin/env sh
 set -eu
 printf '%s\n' '${script.marker}' > .agent/${script.marker}
@@ -545,7 +545,7 @@ printf 'success\n'
 `,
       'utf8',
     );
-    chmodSync(join(worktreePath, '.agent', 'scripts', script.name), 0o755);
+    chmodSync(join(worktreePath, '.agent', 'workflow-scripts', script.name), 0o755);
   }
 }
 
@@ -614,8 +614,8 @@ function completedScriptRunFixture(
   return {
     phaseId,
     runId,
-    command: `scripts/${scriptNameForPhase(phaseId)}`,
-    resolvedCommandPath: join(worktreePath, '.agent', 'scripts', scriptNameForPhase(phaseId)),
+    command: `workflow-scripts/${scriptNameForPhase(phaseId)}`,
+    resolvedCommandPath: join(worktreePath, '.agent', 'workflow-scripts', scriptNameForPhase(phaseId)),
     args: [],
     cwd: worktreePath,
     env: {},
@@ -726,8 +726,8 @@ function validCompletionArtifact(run = pendingCompletionRun('/tmp/worktree')) {
     summary: 'implemented completion routing',
     capture: { reviewFindings: 'none' },
     payload: {
-      changedFiles: ['skills/herdr-implement/scripts/runtime.ts'],
-      checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+      changedFiles: ['skills/herdr-implement/src/runtime.ts'],
+      checksRun: ['node --test skills/herdr-implement/test/*.test.ts'],
       checksDeferred: [],
       blockers: [],
     },
@@ -819,7 +819,7 @@ test('bootstrap creates worktree-local state and a daemon command that daemon.ts
         'pane',
         'run',
         'pane-1',
-        `node skills/herdr-implement/scripts/daemon.ts --worktree ${JSON.stringify(
+        `node skills/herdr-implement/bin/daemon.ts --worktree ${JSON.stringify(
           worktreePath,
         )} --state .agent/herdr-workflow-run.json --handles .agent/herdr-implement.json`,
       ],
@@ -839,7 +839,7 @@ test('bootstrap creates worktree-local state and a daemon command that daemon.ts
   const daemonCli = spawnSync(
     process.execPath,
     [
-      join(process.cwd(), 'skills/herdr-implement/scripts/daemon.ts'),
+      join(process.cwd(), 'skills/herdr-implement/bin/daemon.ts'),
       '--worktree',
       worktreePath,
       '--state',
@@ -1004,7 +1004,7 @@ test('bootstrap replaces an unhealthy recorded daemon pane before reusing handle
         'pane',
         'run',
         'pane-2',
-        `node skills/herdr-implement/scripts/daemon.ts --worktree ${JSON.stringify(
+        `node skills/herdr-implement/bin/daemon.ts --worktree ${JSON.stringify(
           worktreePath,
         )} --state .agent/herdr-workflow-run.json --handles .agent/herdr-implement.json`,
       ],
@@ -1075,7 +1075,7 @@ test('bootstrap does not reuse an unrelated Herdr worktree', async () => {
         'pane',
         'run',
         'pane-1',
-        `node skills/herdr-implement/scripts/daemon.ts --worktree ${JSON.stringify(
+        `node skills/herdr-implement/bin/daemon.ts --worktree ${JSON.stringify(
           requestedWorktreePath,
         )} --state .agent/herdr-workflow-run.json --handles .agent/herdr-implement.json`,
       ],
@@ -1245,7 +1245,7 @@ test('bootstrap fails when pane run fails before recording started handles', asy
         'pane',
         'run',
         'pane-1',
-        `node skills/herdr-implement/scripts/daemon.ts --worktree ${JSON.stringify(
+        `node skills/herdr-implement/bin/daemon.ts --worktree ${JSON.stringify(
           worktreePath,
         )} --state .agent/herdr-workflow-run.json --handles .agent/herdr-implement.json`,
       ],
@@ -1751,8 +1751,8 @@ test('daemon step accepts completion utility roles for custom workflow roles', a
     resultSchema: 'simplifier-result-v1',
     payload: {
       simplificationSummary: 'Focused validation into a schema module.',
-      changedFiles: ['skills/herdr-implement/scripts/result-schema.ts'],
-      checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+      changedFiles: ['skills/herdr-implement/src/result-schema.ts'],
+      checksRun: ['node --test skills/herdr-implement/test/*.test.ts'],
       checksDeferred: [],
       blockers: [],
     },
@@ -2393,14 +2393,14 @@ test('daemon step routes a missing script command as startup failure', async () 
 set -eu
 printf 'success\\n'
 `,
-    { command: 'scripts/missing-script.sh' },
+    { command: 'workflow-scripts/missing-script.sh' },
   );
 
   const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
   const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
   writeWorkflowRunState(runStatePath, {
     ...scriptWorkflowStateFixture(worktreePath, 19),
-    workflow: normalizeWorkflow(scriptWorkflowFixture({ command: 'scripts/missing-script.sh' })) as never,
+    workflow: normalizeWorkflow(scriptWorkflowFixture({ command: 'workflow-scripts/missing-script.sh' })) as never,
   });
   writeDaemonHandleState(handleStatePath, handleStateFixture(worktreePath, 19, 'tab-1', 'pane-1'));
 
@@ -2510,8 +2510,8 @@ printf 'success\\n'
       run_script: {
         phaseId: 'run_script',
         runId: 'issue-19-run_script-script',
-        command: 'scripts/run-script.sh',
-        resolvedCommandPath: join(worktreePath, '.agent/scripts/run-script.sh'),
+        command: 'workflow-scripts/run-script.sh',
+        resolvedCommandPath: join(worktreePath, '.agent/workflow-scripts/run-script.sh'),
         args: ['19', 'hello', join(worktreePath, '.agent/script-output.txt')],
         cwd: worktreePath,
         env: {

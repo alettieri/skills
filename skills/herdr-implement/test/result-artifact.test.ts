@@ -8,10 +8,10 @@ import {
   createAcceptedResultArtifactSummary,
   evaluateResultArtifact,
   type ResultArtifact,
-} from './result-artifact.ts';
-import { validateResultArtifactAgainstSchema } from './result-schema.ts';
-import { normalizeWorkflow } from './workflow.ts';
-import type { PendingAgentRunState, WorkflowRunState } from './runtime.ts';
+} from '../src/result-artifact.ts';
+import { validateResultArtifactAgainstSchema } from '../src/result-schema.ts';
+import { normalizeWorkflow } from '../src/workflow.ts';
+import type { PendingAgentRunState, WorkflowRunState } from '../src/runtime.ts';
 
 function workflowFixture(): Record<string, unknown> {
   return {
@@ -115,8 +115,8 @@ function baseArtifact(run: PendingAgentRunState): ResultArtifact {
     summary: 'implemented completion routing',
     capture: { reviewFindings: 'none' },
     payload: {
-      changedFiles: ['skills/herdr-implement/scripts/runtime.ts'],
-      checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+      changedFiles: ['skills/herdr-implement/src/runtime.ts'],
+      checksRun: ['node --test skills/herdr-implement/test/*.test.ts'],
       checksDeferred: [],
       blockers: [],
     },
@@ -195,8 +195,8 @@ test('evaluateResultArtifact validates required fields, schema checks, outcome, 
       artifact: {
         ...baseArtifact(pendingRun),
         payload: {
-          changedFiles: ['skills/herdr-implement/scripts/runtime.ts'],
-          checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+          changedFiles: ['skills/herdr-implement/src/runtime.ts'],
+          checksRun: ['node --test skills/herdr-implement/test/*.test.ts'],
           checksDeferred: [],
           blockers: 'still blocked',
         },
@@ -275,8 +275,8 @@ test('evaluateResultArtifact accepts valid artifacts for every built-in result s
       resultSchema: 'implementer-result-v1',
       outcome: 'complete',
       payload: {
-        changedFiles: ['skills/herdr-implement/scripts/result-artifact.ts'],
-        checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+        changedFiles: ['skills/herdr-implement/src/result-artifact.ts'],
+        checksRun: ['node --test skills/herdr-implement/test/*.test.ts'],
         checksDeferred: [],
         blockers: [],
       },
@@ -289,8 +289,8 @@ test('evaluateResultArtifact accepts valid artifacts for every built-in result s
       outcome: 'complete',
       payload: {
         simplificationSummary: 'Focused validation into a schema module.',
-        changedFiles: ['skills/herdr-implement/scripts/result-schema.ts'],
-        checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+        changedFiles: ['skills/herdr-implement/src/result-schema.ts'],
+        checksRun: ['node --test skills/herdr-implement/test/*.test.ts'],
         checksDeferred: [],
         blockers: [],
       },
@@ -314,8 +314,8 @@ test('evaluateResultArtifact accepts valid artifacts for every built-in result s
       resultSchema: 'verifier-result-v1',
       outcome: 'complete',
       payload: {
-        checksSelected: ['node --test skills/herdr-implement/scripts/*.test.ts'],
-        checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+        checksSelected: ['node --test skills/herdr-implement/test/*.test.ts'],
+        checksRun: ['node --test skills/herdr-implement/test/*.test.ts'],
         checksDeferred: [],
         failures: [],
         blockers: [],

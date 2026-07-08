@@ -13,12 +13,12 @@ import {
   resolveCommandPath,
   writeCommandLogFiles,
   type CommandPhaseWorkflowState,
-} from './command-phase.ts';
+} from '../src/command-phase.ts';
 
 function tempWorktree(): string {
   const worktreePath = mkdtempSync(join(tmpdir(), 'herdr-command-phase-'));
   mkdirSync(join(worktreePath, '.agent'), { recursive: true });
-  mkdirSync(join(worktreePath, 'scripts'), { recursive: true });
+  mkdirSync(join(worktreePath, '.agent/workflow-scripts'), { recursive: true });
   return worktreePath;
 }
 
@@ -46,7 +46,7 @@ function commandStateFixture(worktreePath: string): CommandPhaseWorkflowState {
       phases: {
         setup: {
           type: 'script',
-          command: 'scripts/echo.sh',
+          command: 'workflow-scripts/echo.sh',
           on: {},
         },
       },
@@ -120,7 +120,7 @@ test('command phase templates match text-template handling for supported and uns
 test('command phase primitives resolve commands and write logs', () => {
   const worktreePath = tempWorktree();
   const state = commandStateFixture(worktreePath);
-  const scriptPath = join(worktreePath, 'scripts', 'echo.sh');
+  const scriptPath = join(worktreePath, '.agent/workflow-scripts', 'echo.sh');
   writeExecutableScript(
     scriptPath,
     `#!/bin/sh
@@ -128,12 +128,12 @@ printf 'ok\\n'
 `,
   );
 
-  const resolved = resolveCommandPath(worktreePath, state.workflowPath, 'scripts/echo.sh');
+  const resolved = resolveCommandPath(worktreePath, state.workflowPath, 'workflow-scripts/echo.sh');
   assert.equal(resolved, scriptPath);
 
   const paths = buildCommandRunPaths(worktreePath, 'issue-17-setup-script');
   const rawOutput = commandLogContents({
-    command: 'scripts/echo.sh',
+    command: 'workflow-scripts/echo.sh',
     resolvedCommandPath: resolved,
     args: ['one', 'two'],
     cwd: worktreePath,
@@ -150,7 +150,7 @@ printf 'ok\\n'
   assert.equal(existsSync(paths.stderrPath), true);
   assert.equal(existsSync(paths.rawOutputPath), true);
   assert.equal(readFileSync(paths.stdoutPath, 'utf8'), 'ok\n');
-  assert.match(readFileSync(paths.rawOutputPath, 'utf8'), /command: scripts\/echo\.sh/);
+  assert.match(readFileSync(paths.rawOutputPath, 'utf8'), /command: workflow-scripts\/echo\.sh/);
 });
 
 test('command phase outcome parsing accepts tokens and JSON capture', () => {

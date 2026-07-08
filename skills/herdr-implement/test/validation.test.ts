@@ -5,7 +5,7 @@ import {
   optionalBoolean,
   optionalFiniteNumber,
   optionalTrimmedString,
-} from './validation.ts';
+} from '../src/validation.ts';
 
 test('isRecord accepts plain objects and rejects non-record values', () => {
   assert.equal(isRecord({ a: 1 }), true);

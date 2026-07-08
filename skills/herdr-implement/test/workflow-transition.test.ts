@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isTerminalPhase, resolveNextPhase } from './workflow-transition.ts';
+import { isTerminalPhase, resolveNextPhase } from '../src/workflow-transition.ts';
 
 type WorkflowLike = Parameters<typeof resolveNextPhase>[0];
 

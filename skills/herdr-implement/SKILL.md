@@ -31,7 +31,7 @@ If the project override exists, it fully replaces the built-in default workflow 
 Run the workflow dry-run helper to inspect the selected workflow, normalized roles, phases, named outcome transitions, and the transition graph:
 
 ```bash
-node skills/herdr-implement/scripts/dry-run.ts --issue <issue-number-or-url>
+node skills/herdr-implement/bin/dry-run.ts --issue <issue-number-or-url>
 ```
 
 The dry-run helper only reads workflow files and prints the normalized result.

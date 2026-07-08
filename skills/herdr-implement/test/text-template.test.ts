@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { renderTemplate } from './text-template.ts';
+import { renderTemplate } from '../src/text-template.ts';
 
 test('renderTemplate substitutes dotted, dashed, and underscored keys', () => {
   const rendered = renderTemplate('A {{ issue.number }} / {{ issue-input }} / {{ issue_name }}', {

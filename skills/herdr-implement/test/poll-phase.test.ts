@@ -3,14 +3,14 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { daemonStep, readWorkflowRunState, writeDaemonHandleState, writeWorkflowRunState, type WorkflowRunState } from './runtime.ts';
-import { normalizeWorkflow } from './workflow.ts';
-import type { DaemonHandleState } from './workflow-state-store.ts';
+import { daemonStep, readWorkflowRunState, writeDaemonHandleState, writeWorkflowRunState, type WorkflowRunState } from '../src/runtime.ts';
+import { normalizeWorkflow } from '../src/workflow.ts';
+import type { DaemonHandleState } from '../src/workflow-state-store.ts';
 
 function tempWorktree(): string {
   const worktreePath = mkdtempSync(join(tmpdir(), 'herdr-poll-phase-'));
   mkdirSync(join(worktreePath, '.agent'), { recursive: true });
-  mkdirSync(join(worktreePath, 'scripts'), { recursive: true });
+  mkdirSync(join(worktreePath, '.agent/workflow-scripts'), { recursive: true });
   return worktreePath;
 }
 
@@ -29,7 +29,7 @@ function pollWorkflowFixture(start: 'await_review' | 'await_merge' = 'await_revi
     phases: {
       await_review: {
         type: 'poll',
-        command: 'scripts/check-pr-review.sh',
+        command: 'workflow-scripts/check-pr-review.sh',
         args: ['{{ context.pr_url }}', '{{ context.pr_number }}'],
         intervalSeconds: 60,
         timeoutSeconds: 30,
@@ -46,7 +46,7 @@ function pollWorkflowFixture(start: 'await_review' | 'await_merge' = 'await_revi
       },
       await_merge: {
         type: 'poll',
-        command: 'scripts/check-pr-merged.sh',
+        command: 'workflow-scripts/check-pr-merged.sh',
         args: ['{{ context.pr_url }}', '{{ context.pr_number }}'],
         intervalSeconds: 60,
         timeoutSeconds: 30,
@@ -124,7 +124,7 @@ function handleStateFixture(worktreePath: string): DaemonHandleState {
     worktreePath,
     daemonTabId: null,
     daemonPaneId: null,
-    daemonCommand: 'node skills/herdr-implement/scripts/daemon.ts',
+    daemonCommand: 'node skills/herdr-implement/bin/daemon.ts',
     roleAgents: {},
     createdAt: '2026-07-05T00:00:00.000Z',
     updatedAt: '2026-07-05T00:00:00.000Z',
@@ -132,7 +132,7 @@ function handleStateFixture(worktreePath: string): DaemonHandleState {
 }
 
 function installPollScript(worktreePath: string, name: string, body: string): string {
-  const scriptPath = join(worktreePath, 'scripts', name);
+  const scriptPath = join(worktreePath, '.agent/workflow-scripts', name);
   writeExecutableScript(scriptPath, body);
   return scriptPath;
 }
