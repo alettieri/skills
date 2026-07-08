@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { loadWorkflow, normalizeWorkflow, WorkflowValidationError } from './workflow.ts';
+import { resolveNextPhase } from './workflow-transition.ts';
 
 test('loads the default workflow', () => {
   const source = loadWorkflow();
@@ -23,6 +24,7 @@ test('loads the default workflow', () => {
   assert.equal(source.workflow.phases.create_pr.type, 'script');
   assert.equal(source.workflow.phases.await_review.type, 'poll');
   assert.equal(source.workflow.phases.await_merge.type, 'poll');
+  assert.equal(resolveNextPhase(source.workflow, 'run_checks', 'no_checks'), 'commit_changes');
 });
 
 test('project workflow fully replaces the default when present', async () => {
