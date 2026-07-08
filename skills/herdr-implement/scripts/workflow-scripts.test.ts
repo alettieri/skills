@@ -160,6 +160,15 @@ case "$1 $2" in
   "branch --show-current")
     printf 'feature-branch\\n'
     ;;
+  "rev-parse HEAD")
+    printf 'abc123\\n'
+    ;;
+  "ls-remote --heads")
+    printf '\\n'
+    ;;
+  "rev-parse --verify")
+    exit 1
+    ;;
   "push --set-upstream")
     printf '%s %s %s %s\\n' "$1" "$2" "$3" "$4" >> .agent/push-calls.log
     exit 0
@@ -177,6 +186,49 @@ esac
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), 'success');
   assert.match(readFileSync(join(worktreePath, '.agent', 'push-calls.log'), 'utf8'), /push --set-upstream origin feature-branch/);
+});
+
+test('push-branch skips pushing an already-up-to-date remote branch without upstream config', () => {
+  const worktreePath = tempWorktree();
+  const binDir = join(worktreePath, 'bin');
+  mkdirSync(binDir, { recursive: true });
+  writeExecutable(
+    join(binDir, 'git'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "-C" ]]; then
+  shift 2
+fi
+if [[ "$1" == "branch" && "$2" == "--show-current" ]]; then
+  printf 'feature-branch\\n'
+  exit 0
+fi
+if [[ "$1" == "rev-parse" && "$2" == "HEAD" ]]; then
+  printf 'abc123\\n'
+  exit 0
+fi
+if [[ "$1" == "ls-remote" && "$2" == "--heads" && "$3" == "origin" && "$4" == "feature-branch" ]]; then
+  printf 'abc123\\trefs/heads/feature-branch\\n'
+  exit 0
+fi
+if [[ "$1" == "rev-parse" && "$2" == "--verify" && "$3" == "--quiet" && "$4" == "feature-branch@{u}" ]]; then
+  exit 1
+fi
+if [[ "$1" == "push" && "$2" == "--set-upstream" && "$3" == "origin" && "$4" == "feature-branch" ]]; then
+  printf 'unexpected push\\n' >> .agent/push-calls.log
+  exit 1
+fi
+exit 1
+`,
+  );
+
+  const result = runScript('push-branch.sh', worktreePath, {
+    PATH: `${binDir}:${process.env.PATH ?? ''}`,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'success');
+  assert.equal(existsSync(join(worktreePath, '.agent', 'push-calls.log')), false);
 });
 
 test('create-pr emits JSON capture for pr_number and pr_url', () => {
@@ -232,6 +284,61 @@ esac
   assert.equal(result.status, 0, result.stderr);
   const parsed = JSON.parse(result.stdout);
   assert.equal(parsed.outcome, 'success');
+  assert.deepEqual(parsed.capture, {
+    pr_number: 41,
+    pr_url: 'https://example.test/pull/41',
+  });
+});
+
+test('create-pr returns an existing outcome when the branch already has a PR', () => {
+  const worktreePath = tempWorktree();
+  const binDir = join(worktreePath, 'bin');
+  mkdirSync(binDir, { recursive: true });
+  writeExecutable(
+    join(binDir, 'git'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "-C" ]]; then
+  shift 2
+fi
+case "$1 $2" in
+  "branch --show-current")
+    printf 'feature-branch\\n'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+`,
+  );
+  writeExecutable(
+    join(binDir, 'gh'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+case "$1 $2" in
+  "pr view")
+    printf '%s\n' '{"pr_number": 41, "pr_url": "https://example.test/pull/41"}'
+    exit 0
+    ;;
+  "pr create")
+    printf 'unexpected create\\n' >&2
+    exit 1
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+`,
+  );
+
+  const result = runScript('create-pr.sh', worktreePath, {
+    PATH: `${binDir}:${process.env.PATH ?? ''}`,
+    HERDR_BASE_BRANCH: 'main',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.outcome, 'existing');
   assert.deepEqual(parsed.capture, {
     pr_number: 41,
     pr_url: 'https://example.test/pull/41',

@@ -124,6 +124,14 @@ test('adapter owns daemon pane launch, pane commands, and role agent launching',
         },
       },
       {
+        args: ['pane', 'get', 'pane-daemon'],
+        result: {
+          stdout: `${JSON.stringify({ result: { pane: { pane_id: 'pane-daemon', tab_id: 'tab-daemon', terminal_id: 'term-daemon' } } })}\n`,
+          stderr: '',
+          status: 0,
+        },
+      },
+      {
         args: ['pane', 'run', 'pane-current', 'node daemon.js'],
         result: { stdout: '', stderr: '', status: 0 },
       },
@@ -191,6 +199,11 @@ test('adapter owns daemon pane launch, pane commands, and role agent launching',
     tabId: 'tab-daemon',
     paneId: 'pane-current',
     terminalId: null,
+  });
+  assert.deepEqual(adapter.getPaneInfo('pane-daemon'), {
+    paneId: 'pane-daemon',
+    tabId: 'tab-daemon',
+    terminalId: 'term-daemon',
   });
   adapter.runPaneCommand('pane-current', 'node daemon.js');
   assert.deepEqual(

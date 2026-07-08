@@ -34,6 +34,27 @@ if [[ -z "$branch_name" ]]; then
   exit 0
 fi
 
+head_commit="$(git -C "$worktree_path" rev-parse HEAD)"
+remote_output="$(git -C "$worktree_path" ls-remote --heads "$remote_name" "$branch_name" 2>/dev/null || true)"
+remote_head=''
+if [[ -n "$remote_output" ]]; then
+  remote_head="${remote_output%%$'\n'*}"
+  remote_head="${remote_head%%[[:space:]]*}"
+fi
+
+if [[ -n "$remote_head" && "$remote_head" == "$head_commit" ]]; then
+  printf 'success\n'
+  exit 0
+fi
+
+if git -C "$worktree_path" rev-parse --verify --quiet "${branch_name}@{u}" >/dev/null 2>&1; then
+  upstream_commit="$(git -C "$worktree_path" rev-parse "${branch_name}@{u}")"
+  if [[ "$head_commit" == "$upstream_commit" ]]; then
+    printf 'success\n'
+    exit 0
+  fi
+fi
+
 if ! git -C "$worktree_path" push --set-upstream "$remote_name" "$branch_name" >/dev/null; then
   printf 'failure\n'
   exit 0

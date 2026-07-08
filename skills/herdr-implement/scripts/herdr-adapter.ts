@@ -60,6 +60,7 @@ export type HerdrAgentInfo = {
 export type HerdrAdapter = {
   ensureWorktree(repository: RepositoryInfo, branchName: string, issueLabel: string): WorktreeInfo;
   createDaemonPane(workspaceId: string, worktreePath: string): HerdrPaneInfo;
+  getPaneInfo(paneId: string): HerdrPaneInfo | null;
   runPaneCommand(paneId: string, command: string): void;
   launchRoleAgent(
     worktreePath: string,
@@ -134,6 +135,7 @@ type HerdrAgentStartArgs = readonly [
   string,
 ];
 type HerdrAgentMoveArgs = readonly ['pane', 'move', string, '--new-tab', '--workspace', string, '--label', string, '--focus'];
+type HerdrPaneGetArgs = readonly ['pane', 'get', string];
 type HerdrAgentSendArgs = readonly ['agent', 'send', string, string];
 type HerdrAgentSendEnterArgs = readonly ['pane', 'send-keys', string, 'Return'];
 type HerdrAgentGetArgs = readonly ['agent', 'get', string];
@@ -454,7 +456,7 @@ function normalizePaneInfo(value: unknown): HerdrPaneInfo {
   }
 
   const moveResult = isRecord(payload.move_result) ? payload.move_result : null;
-  const pane = moveResult && isRecord(moveResult.pane) ? moveResult.pane : payload;
+  const pane = moveResult && isRecord(moveResult.pane) ? moveResult.pane : isRecord(payload.pane) ? payload.pane : payload;
   const createdTab = moveResult && isRecord(moveResult.created_tab) ? moveResult.created_tab : null;
 
   return {
@@ -550,6 +552,10 @@ function buildAgentStartArgs(
 
 function buildAgentMoveArgs(paneId: string, workspaceId: string, roleLabel: string): HerdrAgentMoveArgs {
   return ['pane', 'move', paneId, '--new-tab', '--workspace', workspaceId, '--label', roleLabel, '--focus'];
+}
+
+function buildPaneGetArgs(paneId: string): HerdrPaneGetArgs {
+  return ['pane', 'get', paneId];
 }
 
 function buildAgentSendArgs(agentName: string, prompt: string): HerdrAgentSendArgs {
@@ -761,6 +767,23 @@ function submitPrompt(runner: HerdrCommandRunner, paneId: string): void {
   safeRunHerdrCommand(runner, buildAgentSendEnterArgs(paneId));
 }
 
+function getPaneInfo(runner: HerdrCommandRunner, paneId: string): HerdrPaneInfo | null {
+  const result = runner.run(buildPaneGetArgs(paneId));
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    return null;
+  }
+
+  const paneInfo = normalizePaneInfo(parseLiteralOrJsonOutput(result.stdout, `herdr pane get ${paneId} output`));
+  if (!paneInfo.paneId) {
+    throw new Error(`herdr pane get ${paneId} output did not include a pane id`);
+  }
+
+  return paneInfo;
+}
+
 function parseAgentStatus(value: unknown): HerdrAgentInfo {
   if (!isRecord(value)) {
     return {
@@ -910,6 +933,9 @@ export function createHerdrAdapter(runner: HerdrCommandRunner = buildDefaultRunn
     },
     submitPrompt(paneId: string): void {
       submitPrompt(runner, paneId);
+    },
+    getPaneInfo(paneId: string): HerdrPaneInfo | null {
+      return getPaneInfo(runner, paneId);
     },
     getAgentStatus(agentName: string): HerdrAgentInfo {
       return getAgentStatus(runner, agentName);
