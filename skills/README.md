@@ -19,6 +19,7 @@ This directory contains the repository’s skills.
 - Inputs: existing issue number or URL.
 - Primary docs:
   - `SKILL.md` (validation-only workflow contract)
+  - `README.md` (developer commands and E2E validation)
   - `workflows/default.yaml` (built-in issue-to-PR workflow graph)
   - `scripts/dry-run.ts` (workflow selection, validation, and graph output)
 - Notes: A project-level `.agent/herdr-workflow.yaml` fully replaces the built-in workflow when present.
