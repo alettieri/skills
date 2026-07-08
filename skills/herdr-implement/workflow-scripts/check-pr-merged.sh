@@ -2,4 +2,4 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec node "${script_dir}/pr-poll-helper.mjs" merged "$@"
+exec node "${script_dir}/../src/pr-poll-helper.mjs" merged "$@"

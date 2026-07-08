@@ -7,7 +7,7 @@ Accepted
 2026-07-06
 
 ## Context
-`skills/herdr-implement/scripts/runtime.ts` originally mixed workflow policy with Herdr CLI mechanics. Callers and tests had to know raw command argument shapes, output envelopes, JSON parsing details, snake-case versus camel-case variants, pane handle shapes, and missing-resource behavior.
+`skills/herdr-implement/src/runtime.ts` originally mixed workflow policy with Herdr CLI mechanics. Callers and tests had to know raw command argument shapes, output envelopes, JSON parsing details, snake-case versus camel-case variants, pane handle shapes, and missing-resource behavior.
 
 That made the runtime module shallow: the interface to the Herdr mechanics was almost as complicated as the implementation. It also lowered locality because a Herdr CLI output change could require edits in runtime orchestration and tests.
 
@@ -36,7 +36,7 @@ Runtime keeps workflow policy: when a worktree is needed, when a daemon should b
 - Accepted: this gives the runtime a cleaner seam.
 
 ## Consequences
-- Herdr CLI behavior belongs in `skills/herdr-implement/scripts/herdr-adapter.ts`.
+- Herdr CLI behavior belongs in `skills/herdr-implement/src/herdr-adapter.ts`.
 - Runtime and Agent lifecycle modules should not build raw Herdr command arrays or parse Herdr output envelopes.
 - Adapter tests are the test surface for command shapes, output variants, and malformed Herdr output.
 - Recoverable command failures can be represented as adapter-level facts; malformed successful output should fail loudly.

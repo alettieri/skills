@@ -14,9 +14,10 @@ See [Skills Index](./skills/README.md) to learn about skills in this project.
 - Add or update tests for any behavior change.
 
 ## herdr-implement architecture
-- Before changing `skills/herdr-implement/scripts/runtime.ts` or adjacent runtime modules, read the ADRs in `docs/adr/`.
+- Before changing `skills/herdr-implement/src/runtime.ts` or adjacent runtime modules, read the ADRs in `docs/adr/`.
 - Current accepted seams: `herdr-adapter.ts` owns Herdr CLI mechanics, `agent-lifecycle.ts` owns Agent dispatch/recovery, `result-artifact.ts` owns Agent result artifacts, `capture.ts` owns shared capture helpers, and `script-phase.ts` owns script execution.
 - The next accepted seam is `workflow-state-store.ts` for durable state paths, read/write, state types, and compatibility normalization; see ADR-0004 before implementing or revising it.
+- Layout changes for `herdr-implement` should follow ADR-0005: source in `src/`, thin command entrypoints in `bin/`, built-in Workflow Scripts in `workflow-scripts/`, and tests in `test/`.
 
 ## Common commands
 - `node skills/herdr-worktree-flow/scripts/pr-monitor.ts --help`

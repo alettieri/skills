@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { NormalizedWorkflow } from './workflow.ts';
+import { readWorkflowScriptSource } from './asset-resolver.ts';
 import { normalizeCapture } from './capture.ts';
 import { renderTemplate } from './text-template.ts';
 import { isRecord, optionalTrimmedString } from './validation.ts';
@@ -104,28 +105,7 @@ export function buildCommandRunPaths(worktreePath: string, runId: string): Comma
 }
 
 export function resolveCommandPath(cwd: string, workflowPath: string, command: string): string {
-  const trimmed = command.trim();
-  if (!trimmed) {
-    throw new Error('script command must be a non-empty string');
-  }
-
-  if (resolve(trimmed) === trimmed && existsSync(trimmed)) {
-    return trimmed;
-  }
-
-  const workflowDir = dirname(resolve(workflowPath));
-  const workflowRoot = dirname(workflowDir);
-  const scriptRoot = resolve(cwd, 'skills/herdr-implement');
-  const searchRoots = [workflowDir, workflowRoot, cwd, scriptRoot];
-
-  for (const root of searchRoots) {
-    const candidate = resolve(root, trimmed);
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  throw new Error(`script command does not exist: ${command}`);
+  return readWorkflowScriptSource(cwd, workflowPath, command).path;
 }
 
 export function renderCommandArgs(state: CommandPhaseWorkflowState, phaseId: string, args: unknown, runId: string): string[] {

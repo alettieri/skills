@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
-import { bootstrap, printBootstrapSummary } from './runtime.ts';
-import { WorkflowValidationError } from './workflow.ts';
-import { optionalTrimmedString } from './validation.ts';
+import { bootstrap, printBootstrapSummary } from '../src/runtime.ts';
+import { WorkflowValidationError } from '../src/workflow.ts';
+import { optionalTrimmedString } from '../src/validation.ts';
 
 function parseIssue(argv: string[]): string {
   const parsed = parseArgs({

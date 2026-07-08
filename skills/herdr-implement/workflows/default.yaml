@@ -45,7 +45,7 @@ phases:
 
   post_worktree_setup:
     type: script
-    command: scripts/post-worktree-setup.sh
+    command: workflow-scripts/post-worktree-setup.sh
     on:
       success: implement
       skipped: implement
@@ -108,7 +108,7 @@ phases:
 
   run_checks:
     type: script
-    command: scripts/run-checks.sh
+    command: workflow-scripts/run-checks.sh
     on:
       success: commit_changes
       no_checks: commit_changes
@@ -119,7 +119,7 @@ phases:
 
   commit_changes:
     type: script
-    command: scripts/commit-changes.sh
+    command: workflow-scripts/commit-changes.sh
     on:
       success: push_branch
       no_changes: blocked
@@ -127,7 +127,7 @@ phases:
 
   push_branch:
     type: script
-    command: scripts/push-branch.sh
+    command: workflow-scripts/push-branch.sh
     on:
       success: create_pr
       failure: failed
@@ -135,7 +135,7 @@ phases:
 
   create_pr:
     type: script
-    command: scripts/create-pr.sh
+    command: workflow-scripts/create-pr.sh
     on:
       success: await_review
       existing: await_review
@@ -144,7 +144,7 @@ phases:
 
   await_review:
     type: poll
-    command: scripts/check-pr-review.sh
+    command: workflow-scripts/check-pr-review.sh
     args:
       - '{{ context.pr_url }}'
       - '{{ context.pr_number }}'
@@ -171,7 +171,7 @@ phases:
 
   await_merge:
     type: poll
-    command: scripts/check-pr-merged.sh
+    command: workflow-scripts/check-pr-merged.sh
     args:
       - '{{ context.pr_url }}'
       - '{{ context.pr_number }}'
@@ -187,7 +187,7 @@ phases:
 
   cleanup:
     type: script
-    command: scripts/cleanup-worktree.sh
+    command: workflow-scripts/cleanup-worktree.sh
     on:
       success: complete
       cleanup_failed: cleanup_failed

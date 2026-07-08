@@ -232,7 +232,7 @@ function scriptRunPathsFor(worktreePath: string, runId: string): ScriptRunPaths 
 }
 
 function scriptPhaseRunnerPath(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), 'script-phase-runner.ts');
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'script-phase-runner.ts');
 }
 
 function renderScriptArgs(state: ScriptPhaseWorkflowState, phaseId: string, args: unknown): string[] {

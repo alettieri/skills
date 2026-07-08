@@ -17,7 +17,7 @@ function writeExecutable(path: string, body: string): void {
 }
 
 function runScript(scriptName: string, cwd: string, env: Record<string, string> = {}): { status: number | null; stdout: string; stderr: string } {
-  const result = spawnSync('bash', [join(process.cwd(), 'skills/herdr-implement/scripts', scriptName), cwd], {
+  const result = spawnSync('bash', [join(process.cwd(), 'skills/herdr-implement/workflow-scripts', scriptName), cwd], {
     cwd,
     encoding: 'utf8',
     env: {

@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { validateResultArtifactAgainstSchema } from './result-schema.ts';
-import { BUILT_IN_RESULT_SCHEMA_DOCUMENTS } from './result-schema-definitions.ts';
+import { validateResultArtifactAgainstSchema } from '../src/result-schema.ts';
+import { BUILT_IN_RESULT_SCHEMA_DOCUMENTS } from '../src/result-schema-definitions.ts';
 
 type SchemaCase = {
   schemaName: string;
@@ -32,14 +32,14 @@ const schemaCases: SchemaCase[] = [
   {
     schemaName: 'implementer-result-v1',
     payload: {
-      changedFiles: ['skills/herdr-implement/scripts/result-artifact.ts'],
-      checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+      changedFiles: ['skills/herdr-implement/src/result-artifact.ts'],
+      checksRun: ['node --test skills/herdr-implement/test/*.test.ts'],
       checksDeferred: ['integration'],
       blockers: [],
     },
     invalidPayload: {
-      changedFiles: 'skills/herdr-implement/scripts/result-artifact.ts',
-      checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+      changedFiles: 'skills/herdr-implement/src/result-artifact.ts',
+      checksRun: ['node --test skills/herdr-implement/test/*.test.ts'],
       checksDeferred: ['integration'],
       blockers: [],
     },
@@ -49,15 +49,15 @@ const schemaCases: SchemaCase[] = [
     schemaName: 'simplifier-result-v1',
     payload: {
       simplificationSummary: 'Reduced result handling to a focused schema module.',
-      changedFiles: ['skills/herdr-implement/scripts/result-schema.ts'],
-      checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+      changedFiles: ['skills/herdr-implement/src/result-schema.ts'],
+      checksRun: ['node --test skills/herdr-implement/test/*.test.ts'],
       checksDeferred: [],
       blockers: [],
     },
     invalidPayload: {
       simplificationSummary: '',
-      changedFiles: ['skills/herdr-implement/scripts/result-schema.ts'],
-      checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+      changedFiles: ['skills/herdr-implement/src/result-schema.ts'],
+      checksRun: ['node --test skills/herdr-implement/test/*.test.ts'],
       checksDeferred: [],
       blockers: [],
     },
@@ -85,15 +85,15 @@ const schemaCases: SchemaCase[] = [
   {
     schemaName: 'verifier-result-v1',
     payload: {
-      checksSelected: ['node --test skills/herdr-implement/scripts/*.test.ts'],
-      checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+      checksSelected: ['node --test skills/herdr-implement/test/*.test.ts'],
+      checksRun: ['node --test skills/herdr-implement/test/*.test.ts'],
       checksDeferred: [],
       failures: [],
       blockers: [],
     },
     invalidPayload: {
-      checksSelected: ['node --test skills/herdr-implement/scripts/*.test.ts'],
-      checksRun: 'node --test skills/herdr-implement/scripts/*.test.ts',
+      checksSelected: ['node --test skills/herdr-implement/test/*.test.ts'],
+      checksRun: 'node --test skills/herdr-implement/test/*.test.ts',
       checksDeferred: [],
       failures: [],
       blockers: [],

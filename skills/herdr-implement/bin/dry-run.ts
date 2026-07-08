@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
-import { loadWorkflow, WorkflowValidationError } from './workflow.ts';
-import { optionalTrimmedString } from './validation.ts';
+import { loadWorkflow, WorkflowValidationError } from '../src/workflow.ts';
+import { optionalTrimmedString } from '../src/validation.ts';
 
 function parseIssue(argv: string[]): string {
   const parsed = parseArgs({
