@@ -16,6 +16,7 @@ import {
   readDaemonHandleState,
   readWorkflowRunState,
   workflowStatePathsFor,
+  validateWorkflowStateCompatibility,
   writeDaemonHandleState,
   writeWorkflowRunState,
   type AcceptedAgentRunState,
@@ -210,6 +211,27 @@ function createDaemonPane(
   return { tabId, paneId };
 }
 
+function recoverDaemonPaneIfHealthy(
+  adapter: HerdrAdapter,
+  existingRunState: WorkflowRunState,
+  existingHandleState: DaemonHandleState,
+): { tabId: string | null; paneId: string | null; healthy: boolean } {
+  if (!existingHandleState.daemonPaneId || !existingHandleState.daemonTabId) {
+    return { tabId: null, paneId: null, healthy: false };
+  }
+
+  const paneInfo = adapter.getPaneInfo(existingHandleState.daemonPaneId);
+  if (!paneInfo || paneInfo.paneId !== existingHandleState.daemonPaneId) {
+    return { tabId: null, paneId: null, healthy: false };
+  }
+
+  return {
+    tabId: existingHandleState.daemonTabId,
+    paneId: existingHandleState.daemonPaneId,
+    healthy: true,
+  };
+}
+
 export function bootstrap(options: BootstrapOptions): BootstrapResult {
   const adapter = resolveHerdrAdapter(options);
 
@@ -233,7 +255,54 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     throw new Error(`existing run state branch mismatch: expected ${branchName}, found ${existingRunState.branchName}`);
   }
 
-  if (existingRunState && existingHandleState?.daemonTabId && existingHandleState.daemonPaneId) {
+  if (existingRunState && existingHandleState) {
+    const recovered = recoverDaemonPaneIfHealthy(adapter, existingRunState, existingHandleState);
+    if (recovered.healthy) {
+      return {
+        issue,
+        workflowPath: workflowSource.path,
+        workspaceId: existingRunState.workspaceId,
+        worktreePath: existingRunState.worktreePath,
+        branchName: existingRunState.branchName,
+        runStatePath,
+        handleStatePath,
+        daemonCommand: existingRunState.daemon.command ?? ensureDaemonCommand(existingRunState.worktreePath),
+        daemonTabId: recovered.tabId,
+        daemonPaneId: recovered.paneId,
+        createdRunState: false,
+        createdHandleState: false,
+      };
+    }
+
+    const daemonCommand = existingRunState.daemon.command ?? ensureDaemonCommand(existingRunState.worktreePath);
+    const { tabId, paneId } = createDaemonPane(
+      adapter,
+      existingRunState.workspaceId,
+      existingRunState.worktreePath,
+      daemonCommand,
+    );
+    const startedAt = nowIso(options.now);
+    const updatedRunState: WorkflowRunState = {
+      ...existingRunState,
+      updatedAt: startedAt,
+      daemon: {
+        tabId,
+        paneId,
+        command: daemonCommand,
+        startedAt,
+      },
+    };
+    writeWorkflowRunState(runStatePath, updatedRunState);
+
+    const updatedHandleState: DaemonHandleState = {
+      ...existingHandleState,
+      daemonTabId: tabId,
+      daemonPaneId: paneId,
+      daemonCommand,
+      updatedAt: startedAt,
+    };
+    writeDaemonHandleState(handleStatePath, updatedHandleState);
+
     return {
       issue,
       workflowPath: workflowSource.path,
@@ -242,9 +311,9 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
       branchName: existingRunState.branchName,
       runStatePath,
       handleStatePath,
-      daemonCommand: existingRunState.daemon.command ?? ensureDaemonCommand(existingRunState.worktreePath),
-      daemonTabId: existingHandleState.daemonTabId,
-      daemonPaneId: existingHandleState.daemonPaneId,
+      daemonCommand,
+      daemonTabId: tabId,
+      daemonPaneId: paneId,
       createdRunState: false,
       createdHandleState: false,
     };
@@ -426,6 +495,8 @@ export function daemonStep(options: DaemonOptions): DaemonStepResult {
   if (!handleState) {
     throw new Error(`daemon handle state does not exist: ${handleStatePath}`);
   }
+
+  validateWorkflowStateCompatibility(statePath, state, handleStatePath, handleState);
 
   if (isTerminalPhase(state.workflow, state.currentPhase)) {
     const updatedAt = nowIso(now);

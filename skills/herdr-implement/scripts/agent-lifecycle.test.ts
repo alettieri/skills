@@ -103,6 +103,9 @@ function createAdapter(overrides: Partial<HerdrAdapter> = {}): HerdrAdapter {
     createDaemonPane() {
       throw new Error('not used');
     },
+    getPaneInfo() {
+      return null;
+    },
     runPaneCommand() {},
     launchRoleAgent() {
       return {

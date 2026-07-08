@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { normalizeCapture } from './capture.ts';
 import { normalizeScriptRunMap, type ScriptRunState } from './script-phase.ts';
 import type { NormalizedWorkflow } from './workflow.ts';
@@ -154,7 +154,16 @@ function readJsonFile(path: string): unknown | null {
 
 function writeJsonFile(path: string, value: unknown): void {
   ensureDir(path);
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  const tempPath = join(dirname(path), `${basename(path)}.${process.pid}.tmp`);
+
+  try {
+    writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    renameSync(tempPath, path);
+  } finally {
+    if (existsSync(tempPath)) {
+      unlinkSync(tempPath);
+    }
+  }
 }
 
 function completionRoleFor(roleId: string): 'implementer' | 'reviewer' {
@@ -182,6 +191,32 @@ export function workflowStatePathsFor(worktreePath: string): { runStatePath: str
     runStatePath: join(worktreePath, WORKFLOW_RUN_STATE_PATH),
     handleStatePath: join(worktreePath, DAEMON_HANDLE_STATE_PATH),
   };
+}
+
+export function validateWorkflowStateCompatibility(
+  runStatePath: string,
+  runState: WorkflowRunState,
+  handleStatePath: string,
+  handleState: DaemonHandleState,
+): void {
+  const issues: string[] = [];
+
+  if (handleState.runStatePath !== runStatePath) {
+    issues.push(`runStatePath mismatch: expected ${runStatePath}, found ${handleState.runStatePath}`);
+  }
+  if (runState.daemonHandlePath !== handleStatePath) {
+    issues.push(`handleStatePath mismatch: expected ${handleStatePath}, found ${runState.daemonHandlePath}`);
+  }
+  if (handleState.workspaceId !== runState.workspaceId) {
+    issues.push(`workspaceId mismatch: expected ${runState.workspaceId}, found ${handleState.workspaceId}`);
+  }
+  if (handleState.worktreePath !== runState.worktreePath) {
+    issues.push(`worktreePath mismatch: expected ${runState.worktreePath}, found ${handleState.worktreePath}`);
+  }
+
+  if (issues.length > 0) {
+    throw new Error(`workflow state compatibility check failed: ${issues.join('; ')}`);
+  }
 }
 
 export function normalizePendingAgentRun(value: unknown): PendingAgentRunState | null {

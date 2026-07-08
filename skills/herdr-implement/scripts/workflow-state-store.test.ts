@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -9,6 +9,7 @@ import {
   WORKFLOW_RUN_STATE_PATH,
   readDaemonHandleState,
   readWorkflowRunState,
+  validateWorkflowStateCompatibility,
   writeDaemonHandleState,
   writeWorkflowRunState,
   type DaemonHandleState,
@@ -116,6 +117,29 @@ test('read helpers reject malformed JSON and invalid schema versions', () => {
   mkdirSync(dirname(handleStatePath), { recursive: true });
   writeFileSync(handleStatePath, JSON.stringify({ schemaVersion: 2 }), 'utf8');
   assert.throws(() => readDaemonHandleState(handleStatePath), /invalid daemon handle state/);
+});
+
+test('write helpers replace interrupted state files with valid JSON', () => {
+  const worktreePath = tempWorktree();
+  const runStatePath = join(worktreePath, WORKFLOW_RUN_STATE_PATH);
+  const handleStatePath = join(worktreePath, DAEMON_HANDLE_STATE_PATH);
+
+  mkdirSync(dirname(runStatePath), { recursive: true });
+  writeFileSync(runStatePath, '{"schemaVersion":1', 'utf8');
+  mkdirSync(dirname(handleStatePath), { recursive: true });
+  writeFileSync(handleStatePath, '{"schemaVersion":1', 'utf8');
+
+  const runState = makeWorkflowRunState(worktreePath);
+  const handleState = makeDaemonHandleState(worktreePath);
+  writeWorkflowRunState(runStatePath, runState);
+  writeDaemonHandleState(handleStatePath, handleState);
+
+  assert.deepEqual(readWorkflowRunState(runStatePath), runState);
+  assert.deepEqual(readDaemonHandleState(handleStatePath), handleState);
+  assert.equal(readFileSync(runStatePath, 'utf8').trim().startsWith('{'), true);
+  assert.equal(readFileSync(handleStatePath, 'utf8').trim().startsWith('{'), true);
+  assert.equal(existsSync(`${runStatePath}.tmp`), false);
+  assert.equal(existsSync(`${handleStatePath}.tmp`), false);
 });
 
 test('readWorkflowRunState normalizes compatibility fields, context defaults, and script runs', () => {
@@ -340,4 +364,59 @@ test('write helpers round trip workflow and daemon handle state', () => {
 
   assert.deepEqual(readWorkflowRunState(runStatePath), runState);
   assert.deepEqual(readDaemonHandleState(handleStatePath), handleState);
+});
+
+test('validateWorkflowStateCompatibility rejects mismatched run state and handle metadata', () => {
+  const worktreePath = tempWorktree();
+  const runState = makeWorkflowRunState(worktreePath);
+  const handleState = {
+    ...makeDaemonHandleState(worktreePath),
+    runStatePath: join(worktreePath, '.agent/other-run.json'),
+    workspaceId: 'w2',
+    worktreePath: join(worktreePath, 'other-worktree'),
+  };
+
+  assert.throws(
+    () =>
+      validateWorkflowStateCompatibility(
+        join(worktreePath, WORKFLOW_RUN_STATE_PATH),
+        runState,
+        join(worktreePath, DAEMON_HANDLE_STATE_PATH),
+        handleState,
+      ),
+    /runStatePath mismatch/,
+  );
+  assert.throws(
+    () =>
+      validateWorkflowStateCompatibility(
+        join(worktreePath, WORKFLOW_RUN_STATE_PATH),
+        runState,
+        join(worktreePath, DAEMON_HANDLE_STATE_PATH),
+        handleState,
+      ),
+    /workspaceId mismatch/,
+  );
+  assert.throws(
+    () =>
+      validateWorkflowStateCompatibility(
+        join(worktreePath, WORKFLOW_RUN_STATE_PATH),
+        runState,
+        join(worktreePath, DAEMON_HANDLE_STATE_PATH),
+        handleState,
+      ),
+    /worktreePath mismatch/,
+  );
+  assert.throws(
+    () =>
+      validateWorkflowStateCompatibility(
+        join(worktreePath, WORKFLOW_RUN_STATE_PATH),
+        {
+          ...runState,
+          daemonHandlePath: join(worktreePath, '.agent/other-handle.json'),
+        },
+        join(worktreePath, DAEMON_HANDLE_STATE_PATH),
+        makeDaemonHandleState(worktreePath),
+      ),
+    /handleStatePath mismatch/,
+  );
 });

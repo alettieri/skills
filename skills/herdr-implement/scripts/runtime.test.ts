@@ -13,8 +13,9 @@ import {
   writeDaemonHandleState,
   writeWorkflowRunState,
 } from './runtime.ts';
-import { normalizeWorkflow } from './workflow.ts';
+import { loadWorkflow, normalizeWorkflow } from './workflow.ts';
 import type { HerdrAdapter } from './herdr-adapter.ts';
+import type { ScriptRunState } from './script-phase.ts';
 
 type HerdrCommandResult = {
   stdout: string;
@@ -433,6 +434,9 @@ function createAdapter(overrides: Partial<HerdrAdapter> = {}): HerdrAdapter {
       };
     },
     runPaneCommand() {},
+    getPaneInfo() {
+      return null;
+    },
     launchRoleAgent() {
       return {
         tabId: 'tab-impl',
@@ -480,6 +484,15 @@ async function makeWorktreeFixture(worktreePath: string): Promise<void> {
   writeFileSync(join(worktreePath, 'skills/herdr-implement/workflows/default.yaml'), JSON.stringify(workflowFixture(), null, 2), 'utf8');
 }
 
+function installDefaultWorkflowFixture(worktreePath: string): void {
+  const defaultWorkflowPath = join(process.cwd(), 'skills/herdr-implement/workflows/default.yaml');
+  writeFileSync(
+    join(worktreePath, 'skills/herdr-implement/workflows/default.yaml'),
+    readFileSync(defaultWorkflowPath, 'utf8'),
+    'utf8',
+  );
+}
+
 async function makeAgentWorkflowFixture(worktreePath: string, reuse = true): Promise<void> {
   await makeWorktreeFixture(worktreePath);
   await mkdir(join(worktreePath, '.agent/prompts'), { recursive: true });
@@ -511,6 +524,118 @@ async function makeCompletionWorkflowFixture(worktreePath: string): Promise<void
     'PROJECT completion prompt for {{ runId }} / {{ phaseId }} / {{ roleId }} / {{ resultPath }} / {{ notifyTarget }} / {{ requiredOutcome }} / {{ optionalCapture }} / {{ completionUtility }}\n',
     'utf8',
   );
+}
+
+function installRecoveryMarkerScripts(worktreePath: string): void {
+  const scripts = [
+    { name: 'commit-changes.sh', marker: 'commit_changes.ran' },
+    { name: 'push-branch.sh', marker: 'push_branch.ran' },
+    { name: 'create-pr.sh', marker: 'create_pr.ran' },
+    { name: 'cleanup-worktree.sh', marker: 'cleanup.ran' },
+  ];
+
+  mkdirSync(join(worktreePath, '.agent', 'scripts'), { recursive: true });
+  for (const script of scripts) {
+    writeFileSync(
+      join(worktreePath, '.agent', 'scripts', script.name),
+      `#!/usr/bin/env sh
+set -eu
+printf '%s\n' '${script.marker}' > .agent/${script.marker}
+printf 'success\n'
+`,
+      'utf8',
+    );
+    chmodSync(join(worktreePath, '.agent', 'scripts', script.name), 0o755);
+  }
+}
+
+function scriptNameForPhase(phaseId: string): string {
+  switch (phaseId) {
+    case 'commit_changes':
+      return 'commit-changes.sh';
+    case 'push_branch':
+      return 'push-branch.sh';
+    case 'create_pr':
+      return 'create-pr.sh';
+    case 'cleanup':
+      return 'cleanup-worktree.sh';
+    default:
+      return `${phaseId}.sh`;
+  }
+}
+
+function defaultWorkflowRecoveryStateFixture(worktreePath: string, issueNumber: number, currentPhase: string) {
+  const workflowPath = join(worktreePath, 'skills/herdr-implement/workflows/default.yaml');
+  return {
+    schemaVersion: 1 as const,
+    issue: {
+      input: `#${issueNumber}`,
+      number: issueNumber,
+      url: null,
+      canonical: `#${issueNumber}`,
+    },
+    workflowPath,
+    workflow: loadWorkflow(worktreePath).workflow as never,
+    sourceRepo: {
+      rootPath: worktreePath,
+      remoteUrl: null,
+      currentBranch: 'main',
+      baseBranch: 'main',
+    },
+    branchName: `issue-${issueNumber}-herdr-implement`,
+    worktreePath,
+    workspaceId: `w${issueNumber}`,
+    currentPhase,
+    context: {},
+    pendingAgentRun: null,
+    acceptedAgentRuns: {},
+    scriptRuns: {},
+    pollRuns: {},
+    createdAt: '2026-06-30T12:00:00.000Z',
+    updatedAt: '2026-06-30T12:00:00.000Z',
+    daemonHandlePath: join(worktreePath, '.agent/herdr-implement.json'),
+    daemon: {
+      tabId: null,
+      paneId: null,
+      command: null,
+      startedAt: null,
+    },
+  };
+}
+
+function completedScriptRunFixture(
+  worktreePath: string,
+  issueNumber: number,
+  phaseId: string,
+  outcome: string,
+): ScriptRunState {
+  const runId = `issue-${issueNumber}-${phaseId}-script`;
+  const runDir = join(worktreePath, '.agent', 'runs', runId);
+  return {
+    phaseId,
+    runId,
+    command: `scripts/${scriptNameForPhase(phaseId)}`,
+    resolvedCommandPath: join(worktreePath, '.agent', 'scripts', scriptNameForPhase(phaseId)),
+    args: [],
+    cwd: worktreePath,
+    env: {},
+    timeoutSeconds: 30,
+    startedAt: '2026-06-30T12:00:00.000Z',
+    finishedAt: '2026-06-30T12:00:01.000Z',
+    durationMs: 1000,
+    timedOut: false,
+    exitCode: 0,
+    signal: null,
+    status: 'complete',
+    outcome,
+    capture: null,
+    stdout: `${outcome}\n`,
+    stderr: '',
+    retryable: false,
+    stdoutPath: join(runDir, 'stdout.log'),
+    stderrPath: join(runDir, 'stderr.log'),
+    rawOutputPath: join(runDir, 'raw.log'),
+  };
 }
 
 function expectedAgentPrompt(input: {
@@ -787,6 +912,14 @@ test('bootstrap recovery reuses existing worktree-local state for the requested 
         status: 0,
       },
     },
+    {
+      args: ['pane', 'get', 'pane-1'],
+      result: {
+        stdout: `${JSON.stringify({ result: { pane: { pane_id: 'pane-1', tab_id: 'tab-1', terminal_id: 'term-1' } } })}\n`,
+        stderr: '',
+        status: 0,
+      },
+    },
   ]);
 
   const result = bootstrap({ cwd: repo, issue: '#16', runner });
@@ -815,12 +948,74 @@ test('bootstrap recovery accepts snake-case Herdr workspace ids', async () => {
         status: 0,
       },
     },
+    {
+      args: ['pane', 'get', 'pane-1'],
+      result: {
+        stdout: `${JSON.stringify({ result: { pane: { pane_id: 'pane-1', tab_id: 'tab-1', terminal_id: 'term-1' } } })}\n`,
+        stderr: '',
+        status: 0,
+      },
+    },
   ]);
 
   const result = bootstrap({ cwd: repo, issue: '#16', runner });
 
   assert.equal(result.workspaceId, 'w16');
   assert.equal(result.daemonPaneId, 'pane-1');
+});
+
+test('bootstrap replaces an unhealthy recorded daemon pane before reusing handles', async () => {
+  const repo = await makeRepo();
+  const repoRoot = realpathSync(repo);
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeWorktreeFixture(worktreePath);
+  writeWorkflowRunState(join(worktreePath, '.agent/herdr-workflow-run.json'), workflowStateFixture(worktreePath, 16));
+  writeDaemonHandleState(join(worktreePath, '.agent/herdr-implement.json'), handleStateFixture(worktreePath, 16, 'tab-1', 'pane-1'));
+
+  const runner = createRunner([
+    {
+      args: ['worktree', 'list', '--cwd', repoRoot, '--json'],
+      result: {
+        stdout: `${JSON.stringify([
+          { workspaceId: 'w16', worktreePath, branch: 'issue-16-herdr-implement' },
+        ])}\n`,
+        stderr: '',
+        status: 0,
+      },
+    },
+    {
+      args: ['pane', 'get', 'pane-1'],
+      result: {
+        stdout: '',
+        stderr: 'pane missing',
+        status: 1,
+      },
+    },
+    {
+      args: ['tab', 'create', '--workspace', 'w16', '--cwd', worktreePath, '--label', 'herdr-implement-daemon', '--focus'],
+      result: { stdout: 'tab-2\n', stderr: '', status: 0 },
+    },
+    {
+      args: ['pane', 'current', '--current'],
+      result: { stdout: 'pane-2\n', stderr: '', status: 0 },
+    },
+    {
+      args: [
+        'pane',
+        'run',
+        'pane-2',
+        `node skills/herdr-implement/scripts/daemon.ts --worktree ${JSON.stringify(
+          worktreePath,
+        )} --state .agent/herdr-workflow-run.json --handles .agent/herdr-implement.json`,
+      ],
+      result: { stdout: '', stderr: '', status: 0 },
+    },
+  ]);
+
+  const result = bootstrap({ cwd: repo, issue: '#16', runner });
+
+  assert.equal(result.daemonPaneId, 'pane-2');
+  assert.equal(readDaemonHandleState(result.handleStatePath)?.daemonPaneId, 'pane-2');
 });
 
 test('bootstrap does not reuse an unrelated Herdr worktree', async () => {
@@ -1081,6 +1276,33 @@ test('daemon step stops immediately on a terminal phase', async () => {
   assert.equal(result.status, 'stop');
   assert.equal(result.currentPhase, 'done');
   assert.match(result.reason ?? '', /terminal phase/);
+});
+
+test('daemon step rejects incompatible daemon handle state before recovery', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeWorktreeFixture(worktreePath);
+  const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+  const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
+  writeWorkflowRunState(runStatePath, workflowStateFixture(worktreePath, 17));
+  writeDaemonHandleState(handleStatePath, {
+    ...handleStateFixture(worktreePath, 17, 'tab-1', 'pane-1'),
+    runStatePath: join(worktreePath, '.agent/other-run.json'),
+    workspaceId: 'w999',
+    worktreePath: join(repo, 'other-worktree'),
+  });
+
+  assert.throws(
+    () =>
+      daemonStep({
+        cwd: worktreePath,
+        statePath: '.agent/herdr-workflow-run.json',
+        handleStatePath: '.agent/herdr-implement.json',
+        runner: createRunner([]),
+        now: () => new Date('2026-06-30T12:34:56.000Z'),
+      }),
+    /runStatePath mismatch|handleStatePath mismatch|workspaceId mismatch|worktreePath mismatch/,
+  );
 });
 
 test('daemon step uses the adapter for agent status recovery decisions', async () => {
@@ -2343,4 +2565,45 @@ printf 'success\\n'
   assert.equal(existsSync(join(worktreePath, '.agent/should-not-run.txt')), false);
   const runState = readWorkflowRunState(runStatePath);
   assert.equal(runState?.currentPhase, 'done');
+});
+
+test('daemon step recovers completed shipping and cleanup phases without rerunning them', async () => {
+  const cases = [
+    { phaseId: 'commit_changes', outcome: 'success', nextPhase: 'push_branch', marker: 'commit_changes.ran' },
+    { phaseId: 'push_branch', outcome: 'success', nextPhase: 'create_pr', marker: 'push_branch.ran' },
+    { phaseId: 'create_pr', outcome: 'existing', nextPhase: 'await_review', marker: 'create_pr.ran' },
+    { phaseId: 'cleanup', outcome: 'success', nextPhase: 'complete', marker: 'cleanup.ran' },
+  ] as const;
+
+  for (const currentCase of cases) {
+    const repo = await makeRepo();
+    const worktreePath = join(repo, 'issue-worktree');
+    await makeWorktreeFixture(worktreePath);
+    installDefaultWorkflowFixture(worktreePath);
+    installRecoveryMarkerScripts(worktreePath);
+
+    const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+    const handleStatePath = join(worktreePath, '.agent/herdr-implement.json');
+    writeWorkflowRunState(runStatePath, {
+      ...defaultWorkflowRecoveryStateFixture(worktreePath, 19, currentCase.phaseId),
+      currentPhase: currentCase.phaseId,
+      scriptRuns: {
+        [currentCase.phaseId]: completedScriptRunFixture(worktreePath, 19, currentCase.phaseId, currentCase.outcome),
+      },
+    });
+    writeDaemonHandleState(handleStatePath, handleStateFixture(worktreePath, 19, 'tab-1', 'pane-1'));
+
+    const result = daemonStep({
+      cwd: worktreePath,
+      statePath: '.agent/herdr-workflow-run.json',
+      handleStatePath: '.agent/herdr-implement.json',
+      runner: createRunner([]),
+      now: () => new Date('2026-06-30T12:34:56.000Z'),
+    });
+
+    assert.equal(result.status, 'continue');
+    assert.equal(result.nextPhase, currentCase.nextPhase);
+    assert.equal(existsSync(join(worktreePath, '.agent', `${currentCase.marker}`)), false);
+    assert.equal(readWorkflowRunState(runStatePath)?.currentPhase, currentCase.nextPhase);
+  }
 });
