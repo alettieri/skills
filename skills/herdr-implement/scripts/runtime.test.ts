@@ -68,6 +68,7 @@ function agentWorkflowFixture(reuse = true, promptTemplate = 'implement.md'): Re
         label: 'implementer',
         agentNameTemplate: 'issue-{{ issue.number }}-implementer',
         model: 'gpt-5.4-mini',
+        resultSchemas: ['implementer-result-v1'],
       },
     },
     phases: {
@@ -112,6 +113,7 @@ function completionWorkflowFixture(): Record<string, unknown> {
         label: 'implementer',
         agentNameTemplate: 'issue-{{ issue.number }}-implementer',
         model: 'gpt-5.4-mini',
+        resultSchemas: ['implementer-result-v1'],
       },
     },
     phases: {
@@ -598,7 +600,12 @@ function validCompletionArtifact(run = pendingCompletionRun('/tmp/worktree')) {
     outcome: 'complete',
     summary: 'implemented completion routing',
     capture: { reviewFindings: 'none' },
-    payload: { changedFiles: ['skills/herdr-implement/scripts/runtime.ts'] },
+    payload: {
+      changedFiles: ['skills/herdr-implement/scripts/runtime.ts'],
+      checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+      checksDeferred: [],
+      blockers: [],
+    },
   };
 }
 
@@ -1479,6 +1486,7 @@ test('daemon step accepts completion utility roles for custom workflow roles', a
         label: 'simplifier',
         agentNameTemplate: 'issue-{{ issue.number }}-simplifier',
         model: 'gpt-5.4-mini',
+        resultSchemas: ['simplifier-result-v1'],
       },
     },
     phases: {
@@ -1519,6 +1527,13 @@ test('daemon step accepts completion utility roles for custom workflow roles', a
     ...validCompletionArtifact(pendingRun),
     role: 'implementer',
     resultSchema: 'simplifier-result-v1',
+    payload: {
+      simplificationSummary: 'Focused validation into a schema module.',
+      changedFiles: ['skills/herdr-implement/scripts/result-schema.ts'],
+      checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+      checksDeferred: [],
+      blockers: [],
+    },
   });
 
   const result = daemonStep({

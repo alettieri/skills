@@ -9,6 +9,7 @@ import {
   evaluateResultArtifact,
   type ResultArtifact,
 } from './result-artifact.ts';
+import { validateResultArtifactAgainstSchema } from './result-schema.ts';
 import { normalizeWorkflow } from './workflow.ts';
 import type { PendingAgentRunState, WorkflowRunState } from './runtime.ts';
 
@@ -23,6 +24,7 @@ function workflowFixture(): Record<string, unknown> {
         label: 'implementer',
         agentNameTemplate: 'issue-{{ issue.number }}-implementer',
         model: 'gpt-5.4-mini',
+        resultSchemas: ['implementer-result-v1'],
       },
     },
     phases: {
@@ -112,7 +114,12 @@ function baseArtifact(run: PendingAgentRunState): ResultArtifact {
     outcome: 'complete',
     summary: 'implemented completion routing',
     capture: { reviewFindings: 'none' },
-    payload: { changedFiles: ['skills/herdr-implement/scripts/runtime.ts'] },
+    payload: {
+      changedFiles: ['skills/herdr-implement/scripts/runtime.ts'],
+      checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+      checksDeferred: [],
+      blockers: [],
+    },
   };
 }
 
@@ -184,6 +191,19 @@ test('evaluateResultArtifact validates required fields, schema checks, outcome, 
       reason: /payload must be an object with string keys/,
     },
     {
+      name: 'invalid schema payload',
+      artifact: {
+        ...baseArtifact(pendingRun),
+        payload: {
+          changedFiles: ['skills/herdr-implement/scripts/runtime.ts'],
+          checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+          checksDeferred: [],
+          blockers: 'still blocked',
+        },
+      },
+      reason: /payload\.blockers must be an array of strings/,
+    },
+    {
       name: 'invalid outcome',
       artifact: { ...baseArtifact(pendingRun), outcome: 'mystery' },
       reason: /outcome mystery is not declared/,
@@ -243,6 +263,129 @@ test('applyAcceptedResultArtifact updates accepted runs and merges capture into 
   assert.equal(updatedState.acceptedAgentRuns[pendingRun.runId].outcome, 'complete');
   assert.equal(updatedState.acceptedAgentRuns[pendingRun.runId].capture?.extra, 'value');
   assert.equal(updatedState.acceptedAgentRuns[pendingRun.runId].resultSchema, 'implementer-result-v1');
+});
+
+test('evaluateResultArtifact accepts valid artifacts for every built-in result schema', async () => {
+  const worktreePath = await tempDir();
+  const schemaCases = [
+    {
+      phaseId: 'implement',
+      roleId: 'implementer',
+      artifactRole: 'implementer',
+      resultSchema: 'implementer-result-v1',
+      outcome: 'complete',
+      payload: {
+        changedFiles: ['skills/herdr-implement/scripts/result-artifact.ts'],
+        checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+        checksDeferred: [],
+        blockers: [],
+      },
+    },
+    {
+      phaseId: 'simplify',
+      roleId: 'simplifier',
+      artifactRole: 'implementer',
+      resultSchema: 'simplifier-result-v1',
+      outcome: 'complete',
+      payload: {
+        simplificationSummary: 'Focused validation into a schema module.',
+        changedFiles: ['skills/herdr-implement/scripts/result-schema.ts'],
+        checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+        checksDeferred: [],
+        blockers: [],
+      },
+    },
+    {
+      phaseId: 'review',
+      roleId: 'reviewer',
+      artifactRole: 'reviewer',
+      resultSchema: 'reviewer-result-v1',
+      outcome: 'approved',
+      payload: {
+        verdict: 'approved',
+        findings: [],
+        hasBlockingFindings: false,
+      },
+    },
+    {
+      phaseId: 'verify',
+      roleId: 'verifier',
+      artifactRole: 'implementer',
+      resultSchema: 'verifier-result-v1',
+      outcome: 'complete',
+      payload: {
+        checksSelected: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+        checksRun: ['node --test skills/herdr-implement/scripts/*.test.ts'],
+        checksDeferred: [],
+        failures: [],
+        blockers: [],
+      },
+    },
+  ] as const;
+
+  for (const item of schemaCases) {
+    const runId = `issue-36-${item.phaseId}-${item.roleId}-1`;
+    const pendingRun: PendingAgentRunState = {
+      runId,
+      phaseId: item.phaseId,
+      roleId: item.roleId,
+      completionRole: item.roleId === 'reviewer' ? 'reviewer' : 'implementer',
+      roleLabel: item.roleId,
+      agentName: `issue-36-${item.roleId}`,
+      resultSchema: item.resultSchema,
+      resultPath: join(worktreePath, '.agent/runs', runId, 'result.json'),
+      notifyTarget: 'issue-36-orchestrator',
+      attemptNumber: 1,
+      startedAt: '2026-07-05T01:00:00.000Z',
+      status: 'pending',
+    };
+    const phase = {
+      type: 'agent',
+      role: item.roleId,
+      promptTemplate: `${item.phaseId}.md`,
+      resultSchema: item.resultSchema,
+      on: { [item.outcome]: 'done' },
+    };
+
+    await writeArtifact(pendingRun.resultPath, {
+      schemaVersion: 1,
+      runId: pendingRun.runId,
+      role: item.artifactRole,
+      phase: item.phaseId,
+      resultSchema: item.resultSchema,
+      status: 'complete',
+      outcome: item.outcome,
+      summary: 'schema-specific completion',
+      capture: { schemaName: item.resultSchema },
+      payload: item.payload,
+    });
+
+    const result = evaluateResultArtifact({
+      resultPath: pendingRun.resultPath,
+      pendingRun,
+      phase: phase as never,
+    });
+
+    assert.equal(result.kind, 'accepted', `${item.resultSchema} should be accepted`);
+
+    assert.doesNotThrow(() =>
+      validateResultArtifactAgainstSchema(
+        {
+          schemaVersion: 1,
+          runId: `run-${item.resultSchema}`,
+          phase: item.phaseId,
+          role: item.artifactRole,
+          status: 'complete',
+          outcome: item.outcome,
+          capture: { schemaName: item.resultSchema },
+          summary: 'schema-specific completion',
+          payload: item.payload,
+          resultSchema: item.resultSchema,
+        },
+        item.resultSchema,
+      ),
+    );
+  }
 });
 
 test('createAcceptedResultArtifactSummary includes the accepted status details', async () => {

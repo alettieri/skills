@@ -14,18 +14,26 @@ roles:
     label: implementer
     agentNameTemplate: issue-{{ issue.number }}-implementer
     model: gpt-5.4-mini
+    resultSchemas:
+      - implementer-result-v1
   simplifier:
     label: simplifier
     agentNameTemplate: issue-{{ issue.number }}-simplifier
     model: gpt-5.4-mini
+    resultSchemas:
+      - simplifier-result-v1
   reviewer:
     label: reviewer
     agentNameTemplate: issue-{{ issue.number }}-reviewer
     model: gpt-5.5
+    resultSchemas:
+      - reviewer-result-v1
   verifier:
     label: verifier
     agentNameTemplate: issue-{{ issue.number }}-verifier
     model: gpt-5.5
+    resultSchemas:
+      - verifier-result-v1
 
 phases:
   setup:

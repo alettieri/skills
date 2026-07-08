@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "herdr-implement verifier result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "runId", "phase", "role", "status", "outcome", "payload"],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "phase": {
+      "type": "string",
+      "minLength": 1
+    },
+    "role": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": ["complete", "blocked", "failed"]
+    },
+    "outcome": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "summary": {
+      "type": ["string", "null"]
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checksSelected", "checksRun", "checksDeferred", "failures", "blockers"],
+      "properties": {
+        "checksSelected": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "checksRun": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "checksDeferred": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "resultSchema": {
+      "type": ["string", "null"]
+    }
+  }
+}

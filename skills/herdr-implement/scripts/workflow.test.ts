@@ -24,6 +24,10 @@ test('loads the default workflow', () => {
   assert.equal(source.workflow.phases.create_pr.type, 'script');
   assert.equal(source.workflow.phases.await_review.type, 'poll');
   assert.equal(source.workflow.phases.await_merge.type, 'poll');
+  assert.deepEqual(source.workflow.roles.implementer.resultSchemas, ['implementer-result-v1']);
+  assert.deepEqual(source.workflow.roles.simplifier.resultSchemas, ['simplifier-result-v1']);
+  assert.deepEqual(source.workflow.roles.reviewer.resultSchemas, ['reviewer-result-v1']);
+  assert.deepEqual(source.workflow.roles.verifier.resultSchemas, ['verifier-result-v1']);
   assert.equal(resolveNextPhase(source.workflow, 'run_checks', 'no_checks'), 'commit_changes');
 });
 
@@ -113,13 +117,14 @@ test('custom roles are supported by agent phases', () => {
     start: 'custom_phase',
     roleDefaults: { agent: 'codex', reuse: true },
     roles: {
-      planner: { model: 'gpt-5.5' },
+      planner: { model: 'gpt-5.5', resultSchemas: ['implementer-result-v1'] },
     },
     phases: {
       custom_phase: {
         type: 'agent',
         role: 'planner',
         promptTemplate: 'planner.md',
+        resultSchema: 'implementer-result-v1',
         on: { complete: 'done' },
       },
       done: { type: 'terminal' },
@@ -128,6 +133,55 @@ test('custom roles are supported by agent phases', () => {
 
   assert.equal(workflow.roles.planner.model, 'gpt-5.5');
   assert.equal(workflow.phases.custom_phase.role, 'planner');
+});
+
+test('unknown role result schemas are rejected', () => {
+  assert.throws(
+    () =>
+      normalizeWorkflow({
+        name: 'bad-role-schema',
+        version: 1,
+        type: 'herdr.issue',
+        start: 'done',
+        roles: {
+          implementer: {
+            resultSchemas: ['missing-result-schema'],
+          },
+        },
+        phases: {
+          done: { type: 'terminal' },
+        },
+      }),
+    /roles\.implementer\.resultSchemas references unknown result schema: missing-result-schema/,
+  );
+});
+
+test('phase result schema must be allowed by the role', () => {
+  assert.throws(
+    () =>
+      normalizeWorkflow({
+        name: 'bad-phase-schema',
+        version: 1,
+        type: 'herdr.issue',
+        start: 'implement',
+        roles: {
+          implementer: {
+            resultSchemas: ['implementer-result-v1'],
+          },
+        },
+        phases: {
+          implement: {
+            type: 'agent',
+            role: 'implementer',
+            promptTemplate: 'implement.md',
+            resultSchema: 'reviewer-result-v1',
+            on: { complete: 'done' },
+          },
+          done: { type: 'terminal' },
+        },
+      }),
+    /phase implement resultSchema reviewer-result-v1 is not allowed by role implementer/,
+  );
 });
 
 test('invalid role references are rejected', () => {

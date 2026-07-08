@@ -6,6 +6,10 @@ import {
   optionalFiniteNumber,
   optionalTrimmedString,
 } from './validation.ts';
+import {
+  validateDeclaredResultSchemas,
+  validatePhaseResultSchemaCompatibility,
+} from './result-schema.ts';
 
 export type WorkflowSource = {
   path: string;
@@ -90,7 +94,9 @@ export function normalizeWorkflow(input: unknown): NormalizedWorkflow {
     throw new WorkflowValidationError(`start references unknown phase: ${start}`);
   }
 
+  validateResultSchemaDeclarations(roles);
   const transitions = validateReferences(phases, roles);
+  validateResultSchemaCompatibility(phases, roles);
 
   return {
     name,
@@ -149,6 +155,41 @@ function normalizePhases(phaseEntries: Record<string, unknown>): Record<string, 
   }
 
   return phases;
+}
+
+function validateResultSchemaDeclarations(roles: Record<string, Record<string, unknown>>): void {
+  for (const [roleName, roleValue] of Object.entries(roles)) {
+    try {
+      validateDeclaredResultSchemas(roleName, roleValue);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new WorkflowValidationError(message);
+    }
+  }
+}
+
+function validateResultSchemaCompatibility(
+  phases: Record<string, NormalizedPhase>,
+  roles: Record<string, Record<string, unknown>>,
+): void {
+  for (const [phaseName, phase] of Object.entries(phases)) {
+    if (phase.type !== 'agent') {
+      continue;
+    }
+
+    const roleName = requireString(phase.role, `phases.${phaseName}.role`);
+    const role = roles[roleName];
+    if (!role) {
+      continue;
+    }
+
+    try {
+      validatePhaseResultSchemaCompatibility(phaseName, phase, roleName, role);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new WorkflowValidationError(message);
+    }
+  }
 }
 
 function optionalStringArray(value: unknown, field: string): string[] | undefined {
