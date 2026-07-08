@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "herdr-implement reviewer result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "runId", "phase", "role", "status", "outcome", "payload"],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "phase": {
+      "type": "string",
+      "minLength": 1
+    },
+    "role": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": ["complete", "blocked", "failed"]
+    },
+    "outcome": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "summary": {
+      "type": ["string", "null"]
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "findings", "hasBlockingFindings"],
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "minLength": 1
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["severity", "message"],
+            "properties": {
+              "severity": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "hasBlockingFindings": {
+          "type": "boolean"
+        }
+      }
+    },
+    "resultSchema": {
+      "type": ["string", "null"]
+    }
+  }
+}

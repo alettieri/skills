@@ -3,6 +3,7 @@ import { mergeCaptureIntoContext, normalizeCapture } from './capture.ts';
 import type { NormalizedPhase } from './workflow.ts';
 import { resolveNextPhase } from './workflow-transition.ts';
 import type { PendingAgentRunState, WorkflowRunState } from './workflow-state-store.ts';
+import { validateResultArtifactAgainstSchema } from './result-schema.ts';
 import { isRecord, optionalTrimmedString } from './validation.ts';
 
 export type ResultArtifact = {
@@ -132,11 +133,16 @@ function classifyResultArtifact(
     };
   }
 
-  if (artifact.capture !== null && !isRecord(artifact.capture)) {
-    return {
-      kind: 'invalid',
-      reason: 'result artifact capture must be an object with string keys',
-    };
+  if (expectedResultSchema) {
+    try {
+      validateResultArtifactAgainstSchema(artifact, expectedResultSchema);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        kind: 'invalid',
+        reason: message,
+      };
+    }
   }
 
   return { kind: 'accepted' };
