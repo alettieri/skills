@@ -35,3 +35,13 @@ node skills/herdr-implement/scripts/dry-run.ts --issue <issue-number-or-url>
 ```
 
 The dry-run helper only reads workflow files and prints the normalized result.
+
+## End-to-End Validation
+
+Run the default workflow E2E harness with:
+
+```bash
+node --test skills/herdr-implement/scripts/default-workflow.e2e.test.ts
+```
+
+The harness uses a temporary repository, fake Herdr adapter, and fixture `.agent/scripts` for `gh`/git-facing phases. It validates persisted `.agent/herdr-workflow-run.json`, `.agent/herdr-implement.json`, run logs under `.agent/runs/`, and `.agent/e2e-events.log` without mutating live repositories or GitHub.
