@@ -5,9 +5,10 @@ start: setup
 
 roleDefaults:
   agent: codex
-  approval: on-request
-  sandbox: workspace-write
   reuse: true
+  codex:
+    approval: on-request
+    sandbox: workspace-write
 
 roles:
   implementer:

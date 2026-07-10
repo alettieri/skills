@@ -14,6 +14,10 @@ test('loads the default workflow', () => {
   assert.equal(source.workflow.type, 'herdr.issue');
   assert.equal(source.workflow.start, 'setup');
   assert.equal(source.workflow.roleDefaults.reuse, true);
+  assert.deepEqual(source.workflow.roleDefaults.codex, {
+    approval: 'on-request',
+    sandbox: 'workspace-write',
+  });
   assert.equal(source.workflow.phases.implement.type, 'agent');
   assert.equal(source.workflow.phases.implement.promptTemplate, 'implement.md');
   assert.equal(source.workflow.phases.simplify.role, 'simplifier');
@@ -89,12 +93,20 @@ test('role defaults are inherited into roles', () => {
     start: 'done',
     roleDefaults: {
       agent: 'codex',
-      approval: 'on-request',
       reuse: true,
       model: 'default-model',
+      codex: {
+        approval: 'on-request',
+        sandbox: 'workspace-write',
+      },
     },
     roles: {
-      implementer: { model: 'gpt-5.4-mini' },
+      implementer: {
+        model: 'gpt-5.4-mini',
+        codex: {
+          sandbox: 'danger-full-access',
+        },
+      },
     },
     phases: {
       done: { type: 'terminal' },
@@ -103,9 +115,12 @@ test('role defaults are inherited into roles', () => {
 
   assert.deepEqual(workflow.roles.implementer, {
     agent: 'codex',
-    approval: 'on-request',
     reuse: true,
     model: 'gpt-5.4-mini',
+    codex: {
+      approval: 'on-request',
+      sandbox: 'danger-full-access',
+    },
   });
 });
 
@@ -115,7 +130,11 @@ test('custom roles are supported by agent phases', () => {
     version: 1,
     type: 'herdr.issue',
     start: 'custom_phase',
-    roleDefaults: { agent: 'codex', reuse: true },
+    roleDefaults: {
+      agent: 'codex',
+      reuse: true,
+      codex: { approval: 'on-request', sandbox: 'workspace-write' },
+    },
     roles: {
       planner: { model: 'gpt-5.5', resultSchemas: ['implementer-result-v1'] },
     },
@@ -132,7 +151,56 @@ test('custom roles are supported by agent phases', () => {
   });
 
   assert.equal(workflow.roles.planner.model, 'gpt-5.5');
+  assert.equal((workflow.roles.planner.codex as { approval: string }).approval, 'on-request');
   assert.equal(workflow.phases.custom_phase.role, 'planner');
+});
+
+test('flat Codex launch fields are rejected', () => {
+  assert.throws(
+    () =>
+      normalizeWorkflow({
+        name: 'flat-defaults',
+        version: 1,
+        type: 'herdr.issue',
+        start: 'done',
+        roleDefaults: {
+          agent: 'codex',
+          reuse: true,
+          approval: 'on-request',
+          sandbox: 'workspace-write',
+        },
+        roles: {},
+        phases: {
+          done: { type: 'terminal' },
+        },
+      }),
+    /roleDefaults\.approval is not supported; move Codex launch settings under roleDefaults\.codex/,
+  );
+
+  assert.throws(
+    () =>
+      normalizeWorkflow({
+        name: 'flat-role',
+        version: 1,
+        type: 'herdr.issue',
+        start: 'done',
+        roleDefaults: {
+          agent: 'codex',
+          reuse: true,
+          codex: { approval: 'on-request', sandbox: 'workspace-write' },
+        },
+        roles: {
+          implementer: {
+            model: 'gpt-5.4-mini',
+            permissionMode: 'workspace-write',
+          },
+        },
+        phases: {
+          done: { type: 'terminal' },
+        },
+      }),
+    /roles\.implementer\.permissionMode is not supported; move Codex launch settings under roles\.implementer\.codex/,
+  );
 });
 
 test('unknown role result schemas are rejected', () => {

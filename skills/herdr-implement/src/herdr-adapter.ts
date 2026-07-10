@@ -7,6 +7,7 @@ import {
   optionalBoolean,
   optionalTrimmedString,
 } from './validation.ts';
+import { buildCodexLaunchArgs } from './codex-launch-policy.ts';
 
 export type HerdrCommandResult = {
   stdout: string;
@@ -526,10 +527,6 @@ function buildAgentStartArgs(
   workspaceId: string,
   role: Record<string, unknown>,
 ): HerdrAgentStartArgs {
-  const approval = requireString(role.approval, 'roles.approval');
-  const sandbox = requireString(role.sandbox, 'roles.sandbox');
-  const model = requireString(role.model, 'roles.model');
-
   return [
     'agent',
     'start',
@@ -540,13 +537,7 @@ function buildAgentStartArgs(
     workspaceId,
     '--focus',
     '--',
-    'codex',
-    '-a',
-    approval,
-    '-m',
-    model,
-    '-s',
-    sandbox,
+    ...buildCodexLaunchArgs(role),
   ];
 }
 

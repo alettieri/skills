@@ -60,9 +60,11 @@ function agentWorkflowFixture(reuse = true, promptTemplate = 'implement.md'): Re
     start: 'setup',
     roleDefaults: {
       agent: 'codex',
-      approval: 'on-request',
-      sandbox: 'workspace-write',
       reuse,
+      codex: {
+        approval: 'on-request',
+        sandbox: 'workspace-write',
+      },
     },
     roles: {
       implementer: {
@@ -105,9 +107,11 @@ function completionWorkflowFixture(): Record<string, unknown> {
     start: 'setup',
     roleDefaults: {
       agent: 'codex',
-      approval: 'on-request',
-      sandbox: 'workspace-write',
       reuse: true,
+      codex: {
+        approval: 'on-request',
+        sandbox: 'workspace-write',
+      },
     },
     roles: {
       implementer: {
