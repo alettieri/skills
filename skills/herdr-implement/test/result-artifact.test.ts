@@ -19,6 +19,14 @@ function workflowFixture(): Record<string, unknown> {
     version: 1,
     type: 'herdr.issue',
     start: 'implement',
+    roleDefaults: {
+      agent: 'codex',
+      reuse: true,
+      codex: {
+        approval: 'on-request',
+        sandbox: 'workspace-write',
+      },
+    },
     roles: {
       implementer: {
         label: 'implementer',

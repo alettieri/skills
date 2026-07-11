@@ -6,7 +6,10 @@ import {
   optionalFiniteNumber,
   optionalTrimmedString,
 } from './validation.ts';
-import { mergeCodexLaunchPolicy } from './codex-launch-policy.ts';
+import {
+  normalizeProviderLaunchPolicy,
+  validateProviderLaunchRole,
+} from './provider-launch-policy.ts';
 import {
   validateDeclaredResultSchemas,
   validatePhaseResultSchemaCompatibility,
@@ -101,6 +104,7 @@ export function normalizeWorkflow(input: unknown): NormalizedWorkflow {
 
   validateResultSchemaDeclarations(roles);
   const transitions = validateReferences(phases, roles);
+  validateLaunchableRoles(phases, roles);
   validateResultSchemaCompatibility(phases, roles);
 
   return {
@@ -140,7 +144,7 @@ function normalizeRoleConfig(
   overrideField: string,
 ): Record<string, unknown> {
   try {
-    return mergeCodexLaunchPolicy(base, baseField, override, overrideField);
+    return normalizeProviderLaunchPolicy(base, baseField, override, overrideField);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new WorkflowValidationError(message);
@@ -270,6 +274,30 @@ function validateReferences(
   }
 
   return transitions;
+}
+
+function validateLaunchableRoles(
+  phases: Record<string, NormalizedPhase>,
+  roles: Record<string, Record<string, unknown>>,
+): void {
+  for (const [phaseName, phase] of Object.entries(phases)) {
+    if (phase.type !== 'agent') {
+      continue;
+    }
+
+    const roleName = requireString(phase.role, `phases.${phaseName}.role`);
+    const role = roles[roleName];
+    if (!role) {
+      continue;
+    }
+
+    try {
+      validateProviderLaunchRole(role, `roles.${roleName}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new WorkflowValidationError(message);
+    }
+  }
 }
 
 function requireVersion(value: unknown): string {

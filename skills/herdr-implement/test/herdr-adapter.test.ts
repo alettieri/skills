@@ -224,6 +224,76 @@ test('adapter owns daemon pane launch, pane commands, and role agent launching',
   adapter.submitPrompt('pane-impl');
 });
 
+test('adapter launches claude-backed agents with the provider seam argv tail', async () => {
+  const repo = await tempRepo();
+  const adapter = createHerdrAdapter(
+    createRunner([
+      {
+        args: [
+          'agent',
+          'start',
+          'issue-2-reviewer',
+          '--cwd',
+          repo.rootPath,
+          '--workspace',
+          'w2',
+          '--focus',
+          '--',
+          'claude',
+          '--model',
+          'claude-sonnet-4.5',
+          '--permission-mode',
+          'plan',
+        ],
+        result: {
+          stdout: `${JSON.stringify({
+            result: {
+              agent: {
+                name: 'issue-2-reviewer',
+                pane_id: 'pane-claude',
+                tab_id: 'tab-start',
+                terminal_id: 'term-claude',
+              },
+            },
+          })}\n`,
+          stderr: '',
+          status: 0,
+        },
+      },
+      {
+        args: ['pane', 'move', 'pane-claude', '--new-tab', '--workspace', 'w2', '--label', 'reviewer', '--focus'],
+        result: {
+          stdout: `${JSON.stringify({
+            result: {
+              move_result: {
+                created_tab: { tab_id: 'tab-claude' },
+                pane: { pane_id: 'pane-claude', tab_id: 'tab-claude', terminal_id: 'term-claude' },
+              },
+            },
+          })}\n`,
+          stderr: '',
+          status: 0,
+        },
+      },
+    ]),
+  );
+
+  assert.deepEqual(
+    adapter.launchRoleAgent(
+      repo.rootPath,
+      'w2',
+      { agent: 'claude', claude: { permissionMode: 'plan' }, model: 'claude-sonnet-4.5' },
+      'reviewer',
+      'issue-2-reviewer',
+    ),
+    {
+      tabId: 'tab-claude',
+      paneId: 'pane-claude',
+      terminalId: 'term-claude',
+    },
+  );
+});
+
 test('getAgentStatus returns missing with command failure details and accepts output variants', async () => {
   const adapter = createHerdrAdapter(
     createRunner([

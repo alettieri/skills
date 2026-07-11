@@ -9,6 +9,8 @@ roleDefaults:
   codex:
     approval: on-request
     sandbox: workspace-write
+  claude:
+    permissionMode: auto
 
 roles:
   implementer:

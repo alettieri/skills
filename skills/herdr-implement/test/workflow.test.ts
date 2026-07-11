@@ -18,6 +18,9 @@ test('loads the default workflow', () => {
     approval: 'on-request',
     sandbox: 'workspace-write',
   });
+  assert.deepEqual(source.workflow.roleDefaults.claude, {
+    permissionMode: 'auto',
+  });
   assert.equal(source.workflow.phases.implement.type, 'agent');
   assert.equal(source.workflow.phases.implement.promptTemplate, 'implement.md');
   assert.equal(source.workflow.phases.simplify.role, 'simplifier');
@@ -121,6 +124,9 @@ test('role defaults are inherited into roles', () => {
       approval: 'on-request',
       sandbox: 'danger-full-access',
     },
+    claude: {
+      permissionMode: 'auto',
+    },
   });
 });
 
@@ -152,6 +158,9 @@ test('custom roles are supported by agent phases', () => {
 
   assert.equal(workflow.roles.planner.model, 'gpt-5.5');
   assert.equal((workflow.roles.planner.codex as { approval: string }).approval, 'on-request');
+  assert.deepEqual(workflow.roles.planner.claude, {
+    permissionMode: 'auto',
+  });
   assert.equal(workflow.phases.custom_phase.role, 'planner');
 });
 
@@ -174,7 +183,7 @@ test('flat Codex launch fields are rejected', () => {
           done: { type: 'terminal' },
         },
       }),
-    /roleDefaults\.approval is not supported; move Codex launch settings under roleDefaults\.codex/,
+    /roleDefaults\.approval is not supported; move launch settings under roleDefaults\.codex or roleDefaults\.claude/,
   );
 
   assert.throws(
@@ -199,8 +208,91 @@ test('flat Codex launch fields are rejected', () => {
           done: { type: 'terminal' },
         },
       }),
-    /roles\.implementer\.permissionMode is not supported; move Codex launch settings under roles\.implementer\.codex/,
+    /roles\.implementer\.permissionMode is not supported; move launch settings under roles\.implementer\.codex or roles\.implementer\.claude/,
   );
+});
+
+test('unknown provider blocks and unsupported agents are rejected', () => {
+  assert.throws(
+    () =>
+      normalizeWorkflow({
+        name: 'unknown-provider-block',
+        version: 1,
+        type: 'herdr.issue',
+        start: 'done',
+        roleDefaults: {
+          agent: 'codex',
+          reuse: true,
+          codex: {
+            approval: 'on-request',
+            sandbox: 'workspace-write',
+          },
+          gemini: {
+            permissionMode: 'auto',
+          },
+        },
+        roles: {},
+        phases: {
+          done: { type: 'terminal' },
+        },
+      }),
+    /roleDefaults\.gemini is not a supported provider block/,
+  );
+
+  assert.throws(
+    () =>
+      normalizeWorkflow({
+        name: 'unsupported-agent',
+        version: 1,
+        type: 'herdr.issue',
+        start: 'done',
+        roleDefaults: {
+          agent: 'gemini',
+          reuse: true,
+        },
+        roles: {},
+        phases: {
+          done: { type: 'terminal' },
+        },
+      }),
+    /roleDefaults\.agent must be one of: codex, claude/,
+  );
+});
+
+test('claude roles are launchable through workflow normalization', () => {
+  const workflow = normalizeWorkflow({
+    name: 'claude-workflow',
+    version: 1,
+    type: 'herdr.issue',
+    start: 'implement',
+    roleDefaults: {
+      reuse: true,
+      agent: 'claude',
+      claude: {
+        permissionMode: 'auto',
+      },
+    },
+    roles: {
+      implementer: {
+        model: 'claude-sonnet-4.5',
+      },
+    },
+    phases: {
+      implement: {
+        type: 'agent',
+        role: 'implementer',
+        promptTemplate: 'implement.md',
+        on: { complete: 'done' },
+      },
+      done: { type: 'terminal' },
+    },
+  });
+
+  assert.equal(workflow.roles.implementer.agent, 'claude');
+  assert.equal(workflow.roles.implementer.model, 'claude-sonnet-4.5');
+  assert.deepEqual(workflow.roles.implementer.claude, {
+    permissionMode: 'auto',
+  });
 });
 
 test('unknown role result schemas are rejected', () => {
@@ -232,8 +324,17 @@ test('phase result schema must be allowed by the role', () => {
         version: 1,
         type: 'herdr.issue',
         start: 'implement',
+        roleDefaults: {
+          agent: 'codex',
+          reuse: true,
+          codex: {
+            approval: 'on-request',
+            sandbox: 'workspace-write',
+          },
+        },
         roles: {
           implementer: {
+            model: 'gpt-5.4-mini',
             resultSchemas: ['implementer-result-v1'],
           },
         },
