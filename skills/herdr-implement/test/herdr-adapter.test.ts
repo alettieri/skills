@@ -210,7 +210,7 @@ test('adapter owns daemon pane launch, pane commands, and role agent launching',
     adapter.launchRoleAgent(
       repo.rootPath,
       'w1',
-      { agent: 'codex', approval: 'on-request', sandbox: 'workspace-write', model: 'gpt-5.4-mini' },
+      { agent: 'codex', codex: { approval: 'on-request', sandbox: 'workspace-write' }, model: 'gpt-5.4-mini' },
       'implementer',
       'issue-1-implementer',
     ),
@@ -365,7 +365,7 @@ test('adapter throws when pane move succeeds without required handles', async ()
       adapter.launchRoleAgent(
         repo.rootPath,
         'w1',
-        { agent: 'codex', approval: 'on-request', sandbox: 'workspace-write', model: 'gpt-5.4-mini' },
+        { agent: 'codex', codex: { approval: 'on-request', sandbox: 'workspace-write' }, model: 'gpt-5.4-mini' },
         'implementer',
         'issue-1-implementer',
       ),

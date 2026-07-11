@@ -16,9 +16,11 @@ function workflowFixture(): Record<string, unknown> {
     start: 'implement',
     roleDefaults: {
       agent: 'codex',
-      approval: 'on-request',
-      sandbox: 'workspace-write',
       reuse: true,
+      codex: {
+        approval: 'on-request',
+        sandbox: 'workspace-write',
+      },
     },
     roles: {
       implementer: {

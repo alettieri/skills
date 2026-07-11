@@ -6,6 +6,7 @@ import {
   optionalFiniteNumber,
   optionalTrimmedString,
 } from './validation.ts';
+import { mergeCodexLaunchPolicy } from './codex-launch-policy.ts';
 import {
   validateDeclaredResultSchemas,
   validatePhaseResultSchemaCompatibility,
@@ -76,10 +77,14 @@ export function normalizeWorkflow(input: unknown): NormalizedWorkflow {
   const version = requireVersion(workflow.version);
   const type = requireString(workflow.type, 'type');
   const start = requireString(workflow.start, 'start');
-  const roleDefaults = {
-    reuse: true,
-    ...optionalRecord(workflow.roleDefaults, 'roleDefaults'),
-  };
+  const roleDefaults = normalizeRoleConfig(
+    {
+      reuse: true,
+    },
+    'roleDefaults',
+    optionalRecord(workflow.roleDefaults, 'roleDefaults'),
+    'roleDefaults',
+  );
   const roleEntries = optionalRecord(workflow.roles, 'roles');
   const phaseEntries = requireRecord(workflow.phases, 'phases');
 
@@ -117,13 +122,29 @@ function normalizeRoles(
   const roles: Record<string, Record<string, unknown>> = {};
 
   for (const [roleName, roleValue] of Object.entries(roleEntries)) {
-    roles[roleName] = {
-      ...roleDefaults,
-      ...requireRecord(roleValue, `roles.${roleName}`),
-    };
+    roles[roleName] = normalizeRoleConfig(
+      roleDefaults,
+      'roleDefaults',
+      requireRecord(roleValue, `roles.${roleName}`),
+      `roles.${roleName}`,
+    );
   }
 
   return roles;
+}
+
+function normalizeRoleConfig(
+  base: Record<string, unknown>,
+  baseField: string,
+  override: Record<string, unknown>,
+  overrideField: string,
+): Record<string, unknown> {
+  try {
+    return mergeCodexLaunchPolicy(base, baseField, override, overrideField);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new WorkflowValidationError(message);
+  }
 }
 
 function normalizePhases(phaseEntries: Record<string, unknown>): Record<string, NormalizedPhase> {
