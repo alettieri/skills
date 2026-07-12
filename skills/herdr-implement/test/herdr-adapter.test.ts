@@ -34,7 +34,7 @@ async function tempRepo(): Promise<RepositoryInfo> {
   };
 }
 
-test('ensureWorktree normalizes existing and created worktree outputs', async () => {
+test('findWorktreeByBranch does not create and createWorktree normalizes created worktree output', async () => {
   const repo = await tempRepo();
   const adapter = createHerdrAdapter(
     createRunner([
@@ -88,14 +88,17 @@ test('ensureWorktree normalizes existing and created worktree outputs', async ()
     ]),
   );
 
-  const existing = adapter.ensureWorktree(repo, 'issue-1-herdr-implement', 'issue-1');
+  const existing = adapter.findWorktreeByBranch(repo, 'issue-1-herdr-implement');
   assert.deepEqual(existing, {
     workspaceId: 'w1',
     worktreePath: '/tmp/worktree-1',
     branchName: 'issue-1-herdr-implement',
   });
 
-  const created = adapter.ensureWorktree(repo, 'issue-2-herdr-implement', 'issue-2');
+  const missing = adapter.findWorktreeByBranch(repo, 'issue-2-herdr-implement');
+  assert.equal(missing, null);
+
+  const created = adapter.createWorktree(repo, 'issue-2-herdr-implement', 'issue-2');
   assert.deepEqual(created, {
     workspaceId: 'w2',
     worktreePath: '/tmp/worktree-2',
@@ -334,7 +337,20 @@ test('adapter throws on malformed JSON and invalid shapes', async () => {
   const adapter = createHerdrAdapter(
     createRunner([
       {
-        args: ['worktree', 'list', '--cwd', repo.rootPath, '--json'],
+        args: [
+          'worktree',
+          'create',
+          '--cwd',
+          repo.rootPath,
+          '--branch',
+          'issue-1-herdr-implement',
+          '--base',
+          'main',
+          '--label',
+          'issue-1',
+          '--focus',
+          '--json',
+        ],
         result: { stdout: '{not-json}\n', stderr: '', status: 0 },
       },
       {
@@ -344,7 +360,7 @@ test('adapter throws on malformed JSON and invalid shapes', async () => {
     ]),
   );
 
-  assert.throws(() => adapter.ensureWorktree(repo, 'issue-1-herdr-implement', 'issue-1'), /returned invalid JSON/);
+  assert.throws(() => adapter.createWorktree(repo, 'issue-1-herdr-implement', 'issue-1'), /returned invalid JSON/);
   assert.throws(() => adapter.createDaemonPane('w1', repo.rootPath), /tab create.tabId must be a string when present/);
 });
 
@@ -353,9 +369,22 @@ test('adapter throws when successful worktree output omits required fields', asy
   const adapter = createHerdrAdapter(
     createRunner([
       {
-        args: ['worktree', 'list', '--cwd', repo.rootPath, '--json'],
+        args: [
+          'worktree',
+          'create',
+          '--cwd',
+          repo.rootPath,
+          '--branch',
+          'issue-1-herdr-implement',
+          '--base',
+          'main',
+          '--label',
+          'issue-1',
+          '--focus',
+          '--json',
+        ],
         result: {
-          stdout: `${JSON.stringify([{ branch: 'issue-1-herdr-implement', path: '/tmp/worktree-1' }])}\n`,
+          stdout: `${JSON.stringify({ branch: 'issue-1-herdr-implement', path: '/tmp/worktree-1' })}\n`,
           stderr: '',
           status: 0,
         },
@@ -363,7 +392,7 @@ test('adapter throws when successful worktree output omits required fields', asy
     ]),
   );
 
-  assert.throws(() => adapter.ensureWorktree(repo, 'issue-1-herdr-implement', 'issue-1'), /did not include a workspace id/);
+  assert.throws(() => adapter.createWorktree(repo, 'issue-1-herdr-implement', 'issue-1'), /did not include a workspace id/);
 });
 
 test('adapter throws when successful agent get output is shape-invalid', async () => {

@@ -99,6 +99,12 @@ function baseHandleState(worktreePath: string): DaemonHandleState {
 
 function createAdapter(overrides: Partial<HerdrAdapter> = {}): HerdrAdapter {
   return {
+    findWorktreeByBranch() {
+      return null;
+    },
+    createWorktree() {
+      throw new Error('not used');
+    },
     ensureWorktree() {
       throw new Error('not used');
     },
