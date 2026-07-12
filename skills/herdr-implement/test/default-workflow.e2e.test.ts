@@ -113,6 +113,10 @@ class DefaultWorkflowFakeHerdr implements HerdrAdapter {
     return null;
   }
 
+  readPaneTranscript(): string {
+    return '';
+  }
+
   runPaneCommand(_paneId: string, command: string): void {
     this.daemonCommands.push(command);
     appendEvent(this.worktreePath, { type: 'daemon-command', command });
