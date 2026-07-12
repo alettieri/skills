@@ -15,25 +15,25 @@ roleDefaults:
 roles:
   implementer:
     label: implementer
-    agentNameTemplate: issue-{{ issue.number }}-implementer
+    agentNameTemplate: issue-{{ issue.slug }}-implementer
     model: gpt-5.4-mini
     resultSchemas:
       - implementer-result-v1
   simplifier:
     label: simplifier
-    agentNameTemplate: issue-{{ issue.number }}-simplifier
+    agentNameTemplate: issue-{{ issue.slug }}-simplifier
     model: gpt-5.4-mini
     resultSchemas:
       - simplifier-result-v1
   reviewer:
     label: reviewer
-    agentNameTemplate: issue-{{ issue.number }}-reviewer
+    agentNameTemplate: issue-{{ issue.slug }}-reviewer
     model: gpt-5.5
     resultSchemas:
       - reviewer-result-v1
   verifier:
     label: verifier
-    agentNameTemplate: issue-{{ issue.number }}-verifier
+    agentNameTemplate: issue-{{ issue.slug }}-verifier
     model: gpt-5.5
     resultSchemas:
       - verifier-result-v1

@@ -15,9 +15,9 @@ export const DAEMON_HANDLE_STATE_PATH = '.agent/herdr-implement.json';
 
 export type IssueReference = {
   input: string;
-  number: number | null;
   url: string | null;
   canonical: string;
+  slug: string;
 };
 
 export type RepositoryInfo = {
@@ -495,11 +495,53 @@ export function normalizeWorkflowRunState(value: Record<string, unknown>): Workf
   const context = isRecord(value.context) ? { ...value.context } : {};
   return {
     ...(value as WorkflowRunState),
+    issue: normalizeIssueReference(value.issue),
     pendingAgentRun: normalizePendingAgentRun(value.pendingAgentRun),
     acceptedAgentRuns: normalizeAcceptedAgentRunMap(value.acceptedAgentRuns),
     scriptRuns: normalizeScriptRunMap(value.scriptRuns),
     pollRuns: normalizePollRunMap(value.pollRuns),
     context,
+  };
+}
+
+export function slugifyIssueCanonical(value: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  if (!slug) {
+    throw new Error('issue reference must contain at least one letter or number so a stable slug can be derived');
+  }
+
+  if (slug.length <= 50) {
+    return slug;
+  }
+
+  const capped = slug.slice(0, 50);
+  const boundary = capped.lastIndexOf('-');
+  return boundary > 0 ? capped.slice(0, boundary) : capped;
+}
+
+export function normalizeIssueReference(value: unknown): IssueReference {
+  if (!isRecord(value)) {
+    throw new Error('workflow run state issue must be an object');
+  }
+
+  const input = optionalTrimmedString(value.input);
+  const canonical = optionalTrimmedString(value.canonical);
+  const url = value.url === null ? null : optionalTrimmedString(value.url);
+  const slug = optionalTrimmedString(value.slug) ?? (canonical ? slugifyIssueCanonical(canonical) : null);
+
+  if (!input || !canonical || !slug) {
+    throw new Error('workflow run state issue must include input, canonical, and slug');
+  }
+
+  return {
+    input,
+    url,
+    canonical,
+    slug,
   };
 }
 

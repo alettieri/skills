@@ -31,9 +31,9 @@ function commandStateFixture(worktreePath: string): CommandPhaseWorkflowState {
   return {
     issue: {
       input: '#17',
-      number: 17,
       url: null,
       canonical: '#17',
+      slug: '17',
     },
     workflowPath: join(worktreePath, '.agent/herdr-workflow.yaml'),
     workflow: {
@@ -72,7 +72,7 @@ test('command phase primitives render templates and build runtime metadata', () 
   const state = commandStateFixture(worktreePath);
   const runId = 'issue-17-setup-script';
 
-  const args = renderCommandArgs(state, 'setup', ['{{ issue.number }}', '{{ context.greeting }}', '{{ run.id }}'], runId);
+  const args = renderCommandArgs(state, 'setup', ['{{ issue.slug }}', '{{ context.greeting }}', '{{ run.id }}'], runId);
   const env = renderCommandEnv(state, 'setup', { GREETING: '{{ context.greeting }}' }, runId);
   const runtimeEnv = buildCommandEnvironment(state, 'setup', env, runId);
 
@@ -80,7 +80,7 @@ test('command phase primitives render templates and build runtime metadata', () 
   assert.equal(env.GREETING, 'hello');
   assert.equal(runtimeEnv.HERDR_RUN_ID, runId);
   assert.equal(runtimeEnv.PWD, worktreePath);
-  assert.equal(runtimeEnv.HERDR_ISSUE_NUMBER, '17');
+  assert.equal(runtimeEnv.HERDR_ISSUE_SLUG, '17');
 });
 
 test('command phase templates match text-template handling for supported and unsupported placeholders', () => {
@@ -103,7 +103,7 @@ test('command phase templates match text-template handling for supported and uns
     state,
     'setup',
     [
-      'A {{ issue.number }} / {{ context.issue-input }} / {{ context.issue_name }}',
+      'A {{ issue.slug }} / {{ context.issue-input }} / {{ context.issue_name }}',
       'B {{  context.present.key  }} and {{ context.missing.key }}!',
       'C {{ not supported! }} stays',
     ],

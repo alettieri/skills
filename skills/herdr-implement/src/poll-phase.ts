@@ -33,8 +33,8 @@ function nowIso(now: () => Date): string {
   return now().toISOString();
 }
 
-function buildPollRunId(issueNumber: number | null, phaseId: string): string {
-  return `${issueNumber === null ? 'issue-bootstrap' : `issue-${issueNumber}`}-${phaseId}-poll`;
+function buildPollRunId(issueSlug: string, phaseId: string): string {
+  return `issue-${issueSlug}-${phaseId}-poll`;
 }
 
 function requireString(value: unknown, field: string): string {
@@ -242,7 +242,7 @@ export function advancePollWorkOnce(options: PollPhaseOptions): PollPhaseResult 
     };
   }
 
-  const runId = record?.runId ?? buildPollRunId(state.issue.number, phaseId);
+  const runId = record?.runId ?? buildPollRunId(state.issue.slug, phaseId);
   const startedAt = nowIsoValue;
   const createdAt = record?.createdAt ?? startedAt;
   const tickCount = (record?.tickCount ?? 0) + 1;

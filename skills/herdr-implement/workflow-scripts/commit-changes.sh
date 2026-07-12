@@ -11,6 +11,7 @@ Arguments:
 Environment:
   HERDR_WORKTREE_PATH   Fallback worktree root when no positional path is supplied.
   HERDR_COMMIT_MESSAGE  Optional commit message override.
+  HERDR_ISSUE_CANONICAL Fallback issue reference for generated commit messages.
 EOF
 }
 
@@ -34,8 +35,8 @@ fi
 
 commit_message="${HERDR_COMMIT_MESSAGE:-}"
 if [[ -z "$commit_message" ]]; then
-  if [[ -n "${HERDR_ISSUE_NUMBER:-}" ]]; then
-    commit_message="Issue #${HERDR_ISSUE_NUMBER}: herdr workflow changes"
+  if [[ -n "${HERDR_ISSUE_CANONICAL:-}" ]]; then
+    commit_message="Issue ${HERDR_ISSUE_CANONICAL}: herdr workflow changes"
   else
     commit_message='herdr: workflow changes'
   fi

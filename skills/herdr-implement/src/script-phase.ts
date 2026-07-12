@@ -224,7 +224,7 @@ export function normalizeScriptRunMap(value: unknown): Record<string, ScriptRunS
 }
 
 function buildScriptRunId(issue: CommandPhaseWorkflowState['issue'], phaseId: string): string {
-  return `${issue.number === null ? 'issue-bootstrap' : `issue-${issue.number}`}-${phaseId}-script`;
+  return `issue-${issue.slug}-${phaseId}-script`;
 }
 
 function scriptRunPathsFor(worktreePath: string, runId: string): ScriptRunPaths {

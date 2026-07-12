@@ -1,8 +1,10 @@
 import { parseArgs } from 'node:util';
 import { loadWorkflow, WorkflowValidationError } from '../src/workflow.ts';
+import { normalizeIssueReference } from '../src/runtime.ts';
 import { optionalTrimmedString } from '../src/validation.ts';
+import type { IssueReference } from '../src/workflow-state-store.ts';
 
-function parseIssue(argv: string[]): string {
+function parseIssue(argv: string[]): IssueReference {
   const parsed = parseArgs({
     args: argv.slice(2),
     options: {
@@ -33,20 +35,8 @@ function requireIssue(value: string | undefined): string {
   return issue;
 }
 
-function normalizeIssueReference(value: string): string {
-  const trimmed = value.trim();
-  if (/^#?\d+$/.test(trimmed)) {
-    return trimmed;
-  }
-  if (/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+$/.test(trimmed)) {
-    return trimmed;
-  }
-
-  throw new Error('--issue must be an issue number, #number, or GitHub issue URL');
-}
-
 function printHelp(): void {
-  writeLine('Usage: dry-run.ts --issue <issue-number-or-url>');
+  writeLine('Usage: dry-run.ts --issue <issue-reference>');
 }
 
 function writeLine(line = ''): void {
@@ -57,7 +47,12 @@ function main(): void {
   const issue = parseIssue(process.argv);
   const source = loadWorkflow(process.cwd());
 
-  writeLine(`Issue: ${issue}`);
+  writeLine(`Issue input: ${issue.input}`);
+  writeLine(`Issue canonical: ${issue.canonical}`);
+  writeLine(`Issue slug: ${issue.slug}`);
+  if (issue.url) {
+    writeLine(`Issue URL: ${issue.url}`);
+  }
   writeLine(`Workflow: ${source.path}`);
   writeLine(`Name: ${source.workflow.name}`);
   writeLine(`Version: ${source.workflow.version}`);

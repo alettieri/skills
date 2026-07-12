@@ -25,7 +25,7 @@ function workflowFixture(): Record<string, unknown> {
     roles: {
       implementer: {
         label: 'implementer',
-        agentNameTemplate: 'issue-{{ issue.number }}-implementer',
+        agentNameTemplate: 'issue-{{ issue.slug }}-implementer',
         model: 'gpt-5.4-mini',
         resultSchemas: ['implementer-result-v1'],
       },
@@ -49,9 +49,9 @@ function baseState(worktreePath: string): WorkflowRunState {
     schemaVersion: 1,
     issue: {
       input: '#21',
-      number: 21,
       url: null,
       canonical: '#21',
+      slug: '21',
     },
     workflowPath: join(worktreePath, '.agent/herdr-workflow.yaml'),
     workflow: normalizeWorkflow(workflowFixture()) as never,

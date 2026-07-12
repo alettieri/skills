@@ -41,9 +41,9 @@ function makeWorkflowRunState(worktreePath: string): WorkflowRunState {
     schemaVersion: 1,
     issue: {
       input: '#1',
-      number: 1,
       url: null,
       canonical: '#1',
+      slug: '1',
     },
     workflowPath: join(worktreePath, '.agent/herdr-workflow.yaml'),
     workflow: normalizeWorkflow(workflowFixture()) as never,
@@ -149,9 +149,9 @@ test('readWorkflowRunState normalizes compatibility fields, context defaults, an
     schemaVersion: 1,
     issue: {
       input: '#7',
-      number: 7,
       url: null,
       canonical: '#7',
+      slug: '7',
     },
     workflowPath: join(worktreePath, '.agent/herdr-workflow.yaml'),
     workflow: normalizeWorkflow(workflowFixture()),
@@ -243,6 +243,26 @@ test('readWorkflowRunState normalizes compatibility fields, context defaults, an
   assert.deepEqual(state?.pollRuns, {});
 });
 
+test('readWorkflowRunState normalizes issue references that predate slug persistence', () => {
+  const worktreePath = tempWorktree();
+  const runStatePath = join(worktreePath, WORKFLOW_RUN_STATE_PATH);
+  const rawState = makeWorkflowRunState(worktreePath) as unknown as Record<string, unknown>;
+  rawState.issue = {
+    input: '#12',
+    url: null,
+    canonical: '#12',
+  };
+
+  writeJsonFile(runStatePath, rawState);
+
+  assert.deepEqual(readWorkflowRunState(runStatePath)?.issue, {
+    input: '#12',
+    url: null,
+    canonical: '#12',
+    slug: '12',
+  });
+});
+
 test('readWorkflowRunState rejects persisted script runs with invalid non-null exit codes', () => {
   const worktreePath = tempWorktree();
   const runStatePath = join(worktreePath, WORKFLOW_RUN_STATE_PATH);
@@ -250,9 +270,9 @@ test('readWorkflowRunState rejects persisted script runs with invalid non-null e
     schemaVersion: 1,
     issue: {
       input: '#7',
-      number: 7,
       url: null,
       canonical: '#7',
+      slug: '7',
     },
     workflowPath: join(worktreePath, '.agent/herdr-workflow.yaml'),
     workflow: normalizeWorkflow(workflowFixture()),

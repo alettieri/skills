@@ -19,6 +19,7 @@ import {
   validateWorkflowStateCompatibility,
   writeDaemonHandleState,
   writeWorkflowRunState,
+  slugifyIssueCanonical,
   type AcceptedAgentRunState,
   type DaemonHandleState,
   type IssueReference,
@@ -156,31 +157,83 @@ function detectRepositoryInfo(cwd: string): RepositoryInfo {
   };
 }
 
-function normalizeIssueReference(input: string): IssueReference {
+function canonicalFromIdentifier(identifier: string): string {
+  return /^\d+$/.test(identifier) ? `#${Number(identifier)}` : identifier;
+}
+
+function issueSegmentFromUrl(value: string): { url: string; segment: string } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+
+  if (!parsed.protocol.startsWith('http')) {
+    return null;
+  }
+
+  const segments = parsed.pathname
+    .split('/')
+    .map((segment) => decodeURIComponent(segment).trim())
+    .filter(Boolean);
+  if (segments.length === 0) {
+    return null;
+  }
+
+  const issueMarkerIndex = segments.findIndex((segment) => /^(issues?|tickets?)$/i.test(segment));
+  const segment = issueMarkerIndex >= 0 ? segments[issueMarkerIndex + 1] : segments[segments.length - 1];
+
+  return segment ? { url: value, segment } : null;
+}
+
+export function normalizeIssueReference(input: string): IssueReference {
   const trimmed = input.trim();
+  if (!trimmed) {
+    throw new Error('issue reference must be a non-empty string');
+  }
+
+  const ticketMatch = trimmed.match(/\b([A-Z]+-\d+)\b/);
+  if (ticketMatch) {
+    const canonical = ticketMatch[1];
+    return {
+      input,
+      url: issueSegmentFromUrl(trimmed)?.url ?? null,
+      canonical,
+      slug: slugifyIssueCanonical(canonical),
+    };
+  }
+
   const numberMatch = trimmed.match(/^#?(\d+)$/);
   if (numberMatch) {
-    const number = Number(numberMatch[1]);
+    const canonical = canonicalFromIdentifier(numberMatch[1]);
     return {
       input,
-      number,
       url: null,
-      canonical: `#${number}`,
+      canonical,
+      slug: slugifyIssueCanonical(canonical),
     };
   }
 
-  const urlMatch = trimmed.match(/^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/issues\/(\d+)$/);
-  if (urlMatch) {
-    const number = Number(urlMatch[3]);
+  const urlReference = issueSegmentFromUrl(trimmed);
+  if (urlReference) {
+    const ticketSegmentMatch = urlReference.segment.match(/\b([A-Z]+-\d+)\b/);
+    const segment = ticketSegmentMatch?.[1] ?? urlReference.segment;
+    const canonical = canonicalFromIdentifier(segment);
     return {
       input,
-      number,
-      url: trimmed,
-      canonical: trimmed,
+      url: urlReference.url,
+      canonical,
+      slug: slugifyIssueCanonical(canonical),
     };
   }
 
-  throw new Error('issue must be an issue number, #number, or GitHub issue URL');
+  return {
+    input,
+    url: null,
+    canonical: trimmed,
+    slug: slugifyIssueCanonical(trimmed),
+  };
 }
 
 function ensureDaemonCommand(worktreePath: string): string {
@@ -239,13 +292,13 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
   const issue = normalizeIssueReference(options.issue);
   const repository = detectRepositoryInfo(cwd);
   const workflowSource = loadWorkflow(cwd);
-  const branchName = issue.number === null ? 'issue-bootstrap' : `issue-${issue.number}-herdr-implement`;
-  const worktree = createWorktreeIfNeeded(adapter, repository, branchName, `issue-${issue.number ?? 'bootstrap'}`);
+  const branchName = `issue-${issue.slug}-herdr-implement`;
+  const worktree = createWorktreeIfNeeded(adapter, repository, branchName, `issue-${issue.slug}`);
   const { runStatePath, handleStatePath } = workflowStatePathsFor(worktree.worktreePath);
   const existingRunState = readWorkflowRunState(runStatePath);
   const existingHandleState = readDaemonHandleState(handleStatePath);
 
-  if (existingRunState && existingRunState.issue.canonical !== issue.canonical) {
+  if (existingRunState && existingRunState.issue.slug !== issue.slug) {
     throw new Error(
       `existing run state belongs to ${existingRunState.issue.canonical}, not ${issue.canonical}`,
     );

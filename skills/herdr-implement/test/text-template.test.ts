@@ -3,8 +3,8 @@ import test from 'node:test';
 import { renderTemplate } from '../src/text-template.ts';
 
 test('renderTemplate substitutes dotted, dashed, and underscored keys', () => {
-  const rendered = renderTemplate('A {{ issue.number }} / {{ issue-input }} / {{ issue_name }}', {
-    'issue.number': '42',
+  const rendered = renderTemplate('A {{ issue.slug }} / {{ issue-input }} / {{ issue_name }}', {
+    'issue.slug': '42',
     'issue-input': 'from-input',
     issue_name: 'from-name',
   });
