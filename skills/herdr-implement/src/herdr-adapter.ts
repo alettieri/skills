@@ -7,7 +7,7 @@ import {
   optionalBoolean,
   optionalTrimmedString,
 } from './validation.ts';
-import { buildCodexLaunchArgs } from './codex-launch-policy.ts';
+import { buildProviderLaunchArgs } from './provider-launch-policy.ts';
 
 export type HerdrCommandResult = {
   stdout: string;
@@ -127,13 +127,7 @@ type HerdrAgentStartArgs = readonly [
   string,
   '--focus',
   '--',
-  'codex',
-  '-a',
-  string,
-  '-m',
-  string,
-  '-s',
-  string,
+  ...string[],
 ];
 type HerdrAgentMoveArgs = readonly ['pane', 'move', string, '--new-tab', '--workspace', string, '--label', string, '--focus'];
 type HerdrPaneGetArgs = readonly ['pane', 'get', string];
@@ -537,7 +531,7 @@ function buildAgentStartArgs(
     workspaceId,
     '--focus',
     '--',
-    ...buildCodexLaunchArgs(role),
+    ...buildProviderLaunchArgs(role),
   ];
 }
 
