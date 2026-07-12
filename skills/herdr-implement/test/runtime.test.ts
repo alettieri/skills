@@ -8,6 +8,7 @@ import test from 'node:test';
 import {
   bootstrap,
   daemonStep,
+  normalizeIssueReference,
   readDaemonHandleState,
   readWorkflowRunState,
   writeDaemonHandleState,
@@ -27,6 +28,50 @@ function git(cwd: string, args: string[]): void {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
 }
+
+test('normalizeIssueReference extracts canonical identifiers before slugifying', () => {
+  assert.deepEqual(normalizeIssueReference('ENG-123'), {
+    input: 'ENG-123',
+    url: null,
+    canonical: 'ENG-123',
+    slug: 'eng-123',
+  });
+  assert.equal(normalizeIssueReference('Linear ticket ENG-123').slug, 'eng-123');
+  assert.equal(normalizeIssueReference('Linear ticket ENG-123').canonical, 'ENG-123');
+  assert.deepEqual(normalizeIssueReference('64'), {
+    input: '64',
+    url: null,
+    canonical: '#64',
+    slug: '64',
+  });
+});
+
+test('normalizeIssueReference parses tracker URLs and falls back to whole-string slugs', () => {
+  assert.deepEqual(normalizeIssueReference('https://github.com/alettieri/skills/issues/64'), {
+    input: 'https://github.com/alettieri/skills/issues/64',
+    url: 'https://github.com/alettieri/skills/issues/64',
+    canonical: '#64',
+    slug: '64',
+  });
+  assert.deepEqual(normalizeIssueReference('https://linear.app/acme/issue/ENG-123/fix-parser'), {
+    input: 'https://linear.app/acme/issue/ENG-123/fix-parser',
+    url: 'https://linear.app/acme/issue/ENG-123/fix-parser',
+    canonical: 'ENG-123',
+    slug: 'eng-123',
+  });
+  assert.equal(normalizeIssueReference('release blocker: slug identity!').slug, 'release-blocker-slug-identity');
+});
+
+test('normalizeIssueReference caps slugs at a boundary and rejects degenerate refs', () => {
+  assert.equal(
+    normalizeIssueReference('alpha beta gamma delta epsilon zeta eta theta iota kappa lambda').slug,
+    'alpha-beta-gamma-delta-epsilon-zeta-eta-theta',
+  );
+  assert.throws(
+    () => normalizeIssueReference('!!!'),
+    /issue reference must contain at least one letter or number/,
+  );
+});
 
 function workflowFixture(): Record<string, unknown> {
   return {
@@ -69,7 +114,7 @@ function agentWorkflowFixture(reuse = true, promptTemplate = 'implement.md'): Re
     roles: {
       implementer: {
         label: 'implementer',
-        agentNameTemplate: 'issue-{{ issue.number }}-implementer',
+        agentNameTemplate: 'issue-{{ issue.slug }}-implementer',
         model: 'gpt-5.4-mini',
         resultSchemas: ['implementer-result-v1'],
       },
@@ -116,7 +161,7 @@ function completionWorkflowFixture(): Record<string, unknown> {
     roles: {
       implementer: {
         label: 'implementer',
-        agentNameTemplate: 'issue-{{ issue.number }}-implementer',
+        agentNameTemplate: 'issue-{{ issue.slug }}-implementer',
         model: 'gpt-5.4-mini',
         resultSchemas: ['implementer-result-v1'],
       },
@@ -150,9 +195,9 @@ function workflowStateFixture(worktreePath: string, issueNumber: number, current
     schemaVersion: 1 as const,
     issue: {
       input: `#${issueNumber}`,
-      number: issueNumber,
       url: null,
       canonical: `#${issueNumber}`,
+      slug: String(issueNumber),
     },
     workflowPath: join(worktreePath, 'skills/herdr-implement/workflows/default.yaml'),
     workflow: {
@@ -214,9 +259,9 @@ function agentWorkflowStateFixture(worktreePath: string, issueNumber: number, cu
     schemaVersion: 1 as const,
     issue: {
       input: `#${issueNumber}`,
-      number: issueNumber,
       url: null,
       canonical: `#${issueNumber}`,
+      slug: String(issueNumber),
     },
     workflowPath,
     workflow: normalizeWorkflow(agentWorkflowFixture(reuse)) as never,
@@ -253,9 +298,9 @@ function completionWorkflowStateFixture(worktreePath: string, issueNumber: numbe
     schemaVersion: 1 as const,
     issue: {
       input: `#${issueNumber}`,
-      number: issueNumber,
       url: null,
       canonical: `#${issueNumber}`,
+      slug: String(issueNumber),
     },
     workflowPath,
     workflow: normalizeWorkflow(completionWorkflowFixture()) as never,
@@ -303,7 +348,7 @@ function scriptWorkflowFixture(options?: {
       run_script: {
         type: 'script',
         command: options?.command ?? 'workflow-scripts/run-script.sh',
-        args: ['{{ issue.number }}', '{{ context.greeting }}', '{{ context.outputPath }}'],
+        args: ['{{ issue.slug }}', '{{ context.greeting }}', '{{ context.outputPath }}'],
         cwd: '{{ context.customCwd }}',
         env: {
           HERDR_TEST_GREETING: '{{ context.greeting }}',
@@ -343,9 +388,9 @@ function scriptWorkflowStateFixture(
     schemaVersion: 1 as const,
     issue: {
       input: `#${issueNumber}`,
-      number: issueNumber,
       url: null,
       canonical: `#${issueNumber}`,
+      slug: String(issueNumber),
     },
     workflowPath,
     workflow: normalizeWorkflow(scriptWorkflowFixture(workflowOptions)) as never,
@@ -574,9 +619,9 @@ function defaultWorkflowRecoveryStateFixture(worktreePath: string, issueNumber: 
     schemaVersion: 1 as const,
     issue: {
       input: `#${issueNumber}`,
-      number: issueNumber,
       url: null,
       canonical: `#${issueNumber}`,
+      slug: String(issueNumber),
     },
     workflowPath,
     workflow: loadWorkflow(worktreePath).workflow as never,
@@ -931,6 +976,52 @@ test('bootstrap recovery reuses existing worktree-local state for the requested 
   assert.equal(result.createdRunState, false);
   assert.equal(result.createdHandleState, false);
   assert.equal(result.daemonPaneId, 'pane-1');
+});
+
+test('bootstrap recovery compares issue identity by slug for noisy non-numeric references', async () => {
+  const repo = await makeRepo();
+  const worktreePath = join(repo, 'issue-worktree');
+  await makeWorktreeFixture(worktreePath);
+  writeWorkflowRunState(join(worktreePath, '.agent/herdr-workflow-run.json'), {
+    ...workflowStateFixture(worktreePath, 123),
+    issue: {
+      input: 'ENG-123',
+      url: null,
+      canonical: 'ENG-123',
+      slug: 'eng-123',
+    },
+    branchName: 'issue-eng-123-herdr-implement',
+    workspaceId: 'w-eng',
+  });
+
+  const result = bootstrap({
+    cwd: repo,
+    issue: 'Linear ticket ENG-123',
+    adapter: createAdapter({
+      ensureWorktree(_repository, branchName, issueLabel) {
+        assert.equal(branchName, 'issue-eng-123-herdr-implement');
+        assert.equal(issueLabel, 'issue-eng-123');
+        return {
+          workspaceId: 'w-eng',
+          worktreePath,
+          branchName,
+        };
+      },
+      createDaemonPane(workspaceId) {
+        assert.equal(workspaceId, 'w-eng');
+        return {
+          tabId: 'tab-eng',
+          paneId: 'pane-eng',
+          terminalId: null,
+        };
+      },
+      runPaneCommand() {},
+    }),
+  });
+
+  assert.equal(result.createdRunState, false);
+  assert.equal(result.issue.slug, 'eng-123');
+  assert.equal(readWorkflowRunState(result.runStatePath)?.issue.canonical, 'ENG-123');
 });
 
 test('bootstrap recovery accepts snake-case Herdr workspace ids', async () => {
@@ -1710,7 +1801,7 @@ test('daemon step accepts completion utility roles for custom workflow roles', a
     roles: {
       simplifier: {
         label: 'simplifier',
-        agentNameTemplate: 'issue-{{ issue.number }}-simplifier',
+        agentNameTemplate: 'issue-{{ issue.slug }}-simplifier',
         model: 'gpt-5.4-mini',
         resultSchemas: ['simplifier-result-v1'],
       },
@@ -2525,7 +2616,7 @@ printf 'success\\n'
           PWD: worktreePath,
           HERDR_ISSUE_CANONICAL: '#19',
           HERDR_ISSUE_INPUT: '#19',
-          HERDR_ISSUE_NUMBER: '19',
+          HERDR_ISSUE_SLUG: '19',
           HERDR_PHASE_ID: 'run_script',
           HERDR_RUN_ID: 'issue-19-run_script-script',
           HERDR_WORKFLOW_PATH: join(worktreePath, '.agent/herdr-workflow.yaml'),

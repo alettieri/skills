@@ -509,23 +509,26 @@ test('validation errors use the workflow validation error type', () => {
   );
 });
 
-test('dry-run requires an issue number or GitHub issue URL', () => {
-  const result = spawnSync(process.execPath, ['skills/herdr-implement/bin/dry-run.ts', '--issue', 'not-an-issue'], {
+test('dry-run rejects empty or degenerate issue references', () => {
+  const result = spawnSync(process.execPath, ['skills/herdr-implement/bin/dry-run.ts', '--issue', '!!!'], {
     cwd: process.cwd(),
     encoding: 'utf8',
   });
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /--issue must be an issue number, #number, or GitHub issue URL/);
+  assert.match(result.stderr, /issue reference must contain at least one letter or number/);
 });
 
 test('dry-run prints selected workflow details and transition graph', () => {
-  const result = spawnSync(process.execPath, ['skills/herdr-implement/bin/dry-run.ts', '--issue', '#15'], {
+  const result = spawnSync(process.execPath, ['skills/herdr-implement/bin/dry-run.ts', '--issue', 'Linear ticket ENG-123'], {
     cwd: process.cwd(),
     encoding: 'utf8',
   });
 
   assert.equal(result.status, 0);
+  assert.match(result.stdout, /Issue input: Linear ticket ENG-123/);
+  assert.match(result.stdout, /Issue canonical: ENG-123/);
+  assert.match(result.stdout, /Issue slug: eng-123/);
   assert.match(result.stdout, /Workflow: .*skills\/herdr-implement\/workflows\/default\.yaml/);
   assert.match(result.stdout, /Normalized roles:/);
   assert.match(result.stdout, /- implementer: .*"reuse":true/);

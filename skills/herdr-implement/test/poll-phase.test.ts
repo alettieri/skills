@@ -80,9 +80,9 @@ function pollStateFixture(
     schemaVersion: 1,
     issue: {
       input: '#42',
-      number: 42,
       url: null,
       canonical: '#42',
+      slug: '42',
     },
     workflowPath: join(worktreePath, '.agent/herdr-workflow.yaml'),
     workflow: normalizeWorkflow(pollWorkflowFixture(currentPhase)) as never,

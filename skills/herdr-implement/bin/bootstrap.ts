@@ -30,7 +30,7 @@ function requireIssue(value: string | undefined): string {
 }
 
 function printHelp(): void {
-  process.stdout.write('Usage: bootstrap.ts --issue <issue-number-or-url>\n');
+  process.stdout.write('Usage: bootstrap.ts --issue <issue-reference>\n');
 }
 
 async function main(): Promise<void> {

@@ -5,16 +5,10 @@ import { readWorkflowScriptSource } from './asset-resolver.ts';
 import { normalizeCapture } from './capture.ts';
 import { renderTemplate } from './text-template.ts';
 import { isRecord, optionalTrimmedString } from './validation.ts';
-
-export type CommandIssueReference = {
-  input: string;
-  number: number | null;
-  url: string | null;
-  canonical: string;
-};
+import type { IssueReference } from './workflow-state-store.ts';
 
 export type CommandPhaseWorkflowState = {
-  issue: CommandIssueReference;
+  issue: IssueReference;
   workflowPath: string;
   workflow: NormalizedWorkflow;
   branchName: string;
@@ -82,7 +76,7 @@ export function renderCommandTemplate(
     ...flattenContextValues(state.context),
     'issue.canonical': state.issue.canonical,
     'issue.input': state.issue.input,
-    'issue.number': String(state.issue.number ?? ''),
+    'issue.slug': state.issue.slug,
     'phase.id': phaseId,
     'phase.type': phase?.type ?? '',
     'run.id': runId,
@@ -158,7 +152,7 @@ export function buildCommandEnvironment(
     PWD: state.worktreePath,
     HERDR_ISSUE_CANONICAL: state.issue.canonical,
     HERDR_ISSUE_INPUT: state.issue.input,
-    HERDR_ISSUE_NUMBER: String(state.issue.number ?? ''),
+    HERDR_ISSUE_SLUG: state.issue.slug,
     HERDR_PHASE_ID: phaseId,
     HERDR_RUN_ID: runId,
     HERDR_WORKFLOW_PATH: state.workflowPath,

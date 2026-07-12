@@ -56,7 +56,7 @@ function renderAgentName(template: string, state: WorkflowRunState, roleId: stri
   return renderTemplate(template, {
     'issue.canonical': state.issue.canonical,
     'issue.input': state.issue.input,
-    'issue.number': String(state.issue.number ?? ''),
+    'issue.slug': state.issue.slug,
     roleId,
   });
 }
@@ -70,7 +70,7 @@ function completionRoleFor(roleId: string): 'implementer' | 'reviewer' {
 }
 
 function agentRunPrefix(issue: WorkflowRunState['issue']): string {
-  return issue.number === null ? 'issue-bootstrap' : `issue-${issue.number}`;
+  return `issue-${issue.slug}`;
 }
 
 function buildAgentRunId(state: WorkflowRunState, roleId: string, attemptNumber: number): string {

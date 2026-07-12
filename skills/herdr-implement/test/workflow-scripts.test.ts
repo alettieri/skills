@@ -135,7 +135,7 @@ test('commit-changes emits success and no_changes outcomes', () => {
   assert.equal(commit.status, 0, commit.stderr);
 
   writeFileSync(join(worktreePath, 'README.md'), 'updated\n', 'utf8');
-  const result = runScript('commit-changes.sh', worktreePath, { HERDR_ISSUE_NUMBER: '21' });
+  const result = runScript('commit-changes.sh', worktreePath, { HERDR_ISSUE_CANONICAL: '#21' });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), 'success');
   assert.match(spawnSync('git', ['log', '-1', '--pretty=%s'], { cwd: worktreePath, encoding: 'utf8' }).stdout, /Issue #21: herdr workflow changes/);
