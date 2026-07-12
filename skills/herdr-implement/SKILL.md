@@ -24,6 +24,8 @@ Use this skill when the user references an existing issue, ticket, or URL and wa
 - If health is `timed-out` or `pane-exited`, surface the diagnostics as a blocker instead of blindly re-running.
 - Re-invoking the same issue reference should recover a stalled or dead daemon when the worktree already exists.
 
+Operator note: `bootstrap.ts --help` must remain available without `HERDR_ENV=1`. Running `bootstrap` again for the same issue is the recovery path for an existing run, not a request to fork duplicate work.
+
 ## Inputs
 
 - An existing issue number, ticket key, or issue URL.
