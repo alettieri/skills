@@ -299,6 +299,32 @@ function safeParseRawWorktreeRecord(value: unknown, path: string): SafeParseResu
   return { success: true, data: value as RawHerdrWorktreeRecord };
 }
 
+function hasWorktreeRecordFields(value: Record<string, unknown>): boolean {
+  return ['workspaceId', 'workspace_id', 'worktreePath', 'path', 'cwd', 'branch', 'base'].some(
+    (field) => value[field] !== undefined,
+  );
+}
+
+function extractWorktreeCreatePayload(value: unknown): unknown {
+  const payload = unwrapHerdrResult(value);
+  if (!isRecord(payload)) {
+    return payload;
+  }
+
+  if (hasWorktreeRecordFields(payload)) {
+    return payload;
+  }
+
+  for (const field of ['worktree', 'worktreeInfo', 'worktree_info', 'result', 'data', 'item'] as const) {
+    const nested = payload[field];
+    if (isRecord(nested)) {
+      return nested;
+    }
+  }
+
+  return payload;
+}
+
 function safeParseWorktreeRecords(records: readonly unknown[], path: string): SafeParseResult<readonly RawHerdrWorktreeRecord[]> {
   const parsed: RawHerdrWorktreeRecord[] = [];
   const issues: string[] = [];
@@ -351,7 +377,7 @@ function parseWorktreeListOutput(value: unknown): readonly RawHerdrWorktreeRecor
 }
 
 function safeParseWorktreeCreate(value: unknown): SafeParseResult<RawHerdrWorktreeRecord> {
-  return safeParseRawWorktreeRecord(value, 'worktree create');
+  return safeParseRawWorktreeRecord(extractWorktreeCreatePayload(value), 'worktree create');
 }
 
 function parseWorktreeCreateOutput(value: unknown): RawHerdrWorktreeRecord {
@@ -453,12 +479,20 @@ function normalizePaneInfo(value: unknown): HerdrPaneInfo {
   }
 
   const moveResult = isRecord(payload.move_result) ? payload.move_result : null;
-  const pane = moveResult && isRecord(moveResult.pane) ? moveResult.pane : isRecord(payload.pane) ? payload.pane : payload;
-  const createdTab = moveResult && isRecord(moveResult.created_tab) ? moveResult.created_tab : null;
+  const rootPane = isRecord(payload.root_pane) ? payload.root_pane : null;
+  const pane =
+    (moveResult && isRecord(moveResult.pane) ? moveResult.pane : null) ??
+    rootPane ??
+    (isRecord(payload.pane) ? payload.pane : null) ??
+    payload;
+  const createdTab = moveResult && isRecord(moveResult.created_tab) ? moveResult.created_tab : isRecord(payload.tab) ? payload.tab : null;
 
   return {
     paneId: firstString(pane, ['paneId', 'pane_id', 'id']),
-    tabId: (createdTab ? firstString(createdTab, ['tabId', 'tab_id', 'id']) : null) ?? firstString(pane, ['tabId', 'tab_id']),
+    tabId:
+      (createdTab ? firstString(createdTab, ['tabId', 'tab_id', 'id']) : null) ??
+      firstString(pane, ['tabId', 'tab_id']) ??
+      firstString(payload, ['tabId', 'tab_id']),
     terminalId: firstString(pane, ['terminalId', 'terminal_id']),
   };
 }
@@ -584,11 +618,21 @@ function buildWorktreeCreateArgs(repository: RepositoryInfo, branchName: string,
 
 function workspaceIdFromRaw(record: RawHerdrWorktreeRecord): string | null {
   const raw = record as Record<string, unknown>;
-  return optionalTrimmedString(raw.workspaceId) ?? optionalTrimmedString(raw.workspace_id);
+  return (
+    optionalTrimmedString(raw.workspaceId) ??
+    optionalTrimmedString(raw.workspace_id) ??
+    optionalTrimmedString(raw.open_workspace_id)
+  );
 }
 
 function worktreePathFromRaw(record: RawHerdrWorktreeRecord): string | null {
-  return optionalTrimmedString(record.worktreePath) ?? optionalTrimmedString(record.path) ?? optionalTrimmedString(record.cwd);
+  const raw = record as Record<string, unknown>;
+  return (
+    optionalTrimmedString(record.worktreePath) ??
+    optionalTrimmedString(record.path) ??
+    optionalTrimmedString(record.cwd) ??
+    optionalTrimmedString(raw.checkout_path)
+  );
 }
 
 function normalizeWorktreeRecord(record: RawHerdrWorktreeRecord, label: string): NormalizedHerdrWorktreeRecord {
@@ -691,8 +735,16 @@ function createDaemonPane(
   }
 
   const tabOutput = parseLiteralOrJsonOutput(tabCreate.stdout, 'herdr tab create output');
-  const tabId = parsePaneReference(tabOutput, 'tab create', false).id;
+  const paneInfo = normalizePaneInfo(tabOutput);
+  if (paneInfo.tabId && paneInfo.paneId) {
+    return {
+      tabId: paneInfo.tabId,
+      paneId: paneInfo.paneId,
+      terminalId: paneInfo.terminalId,
+    };
+  }
 
+  const tabId = parsePaneReference(tabOutput, 'tab create', false).id;
   const paneCurrent = runner.run(['pane', 'current', '--current']);
   if (paneCurrent.error) {
     throw paneCurrent.error;
@@ -701,15 +753,14 @@ function createDaemonPane(
     throw new Error(`herdr pane current failed with exit ${paneCurrent.status}: ${paneCurrent.stderr.trim()}`);
   }
 
-  const paneOutput = parseLiteralOrJsonOutput(paneCurrent.stdout, 'herdr pane current output');
-  const paneId = parsePaneReference(paneOutput, 'pane current', true).id;
-  if (!paneId) {
+  const currentPaneInfo = normalizePaneInfo(parseLiteralOrJsonOutput(paneCurrent.stdout, 'herdr pane current output'));
+  if (!currentPaneInfo.paneId) {
     throw formatValidationError('herdr pane current output', ['pane current did not include an id']);
   }
 
   return {
     tabId,
-    paneId,
+    paneId: currentPaneInfo.paneId,
     terminalId: null,
   };
 }

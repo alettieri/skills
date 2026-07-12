@@ -41,7 +41,7 @@ test('findWorktreeByBranch does not create and createWorktree normalizes created
       {
         args: ['worktree', 'list', '--cwd', repo.rootPath, '--json'],
         result: {
-          stdout: `${JSON.stringify([{ workspace_id: 'w1', path: '/tmp/worktree-1', branch: 'issue-1-herdr-implement' }])}\n`,
+          stdout: `${JSON.stringify([{ open_workspace_id: 'w1', path: '/tmp/worktree-1', branch: 'issue-1-herdr-implement' }])}\n`,
           stderr: '',
           status: 0,
         },
@@ -79,7 +79,7 @@ test('findWorktreeByBranch does not create and createWorktree normalizes created
         args: ['worktree', 'list', '--cwd', repo.rootPath, '--json'],
         result: {
           stdout: `${JSON.stringify([
-            { workspaceId: 'w2', worktreePath: '/tmp/worktree-2', branch: 'issue-2-herdr-implement' },
+            { open_workspace_id: 'w2', path: '/tmp/worktree-2', branch: 'issue-2-herdr-implement' },
           ])}\n`,
           stderr: '',
           status: 0,
@@ -103,6 +103,49 @@ test('findWorktreeByBranch does not create and createWorktree normalizes created
     workspaceId: 'w2',
     worktreePath: '/tmp/worktree-2',
     branchName: 'issue-2-herdr-implement',
+  });
+});
+
+test('createWorktree unwraps a wrapped Herdr worktree payload before normalizing it', async () => {
+  const repo = await tempRepo();
+  const adapter = createHerdrAdapter(
+    createRunner([
+      {
+        args: [
+          'worktree',
+          'create',
+          '--cwd',
+          repo.rootPath,
+          '--branch',
+          'issue-3-herdr-implement',
+          '--base',
+          'main',
+          '--label',
+          'issue-3',
+          '--focus',
+          '--json',
+        ],
+        result: {
+          stdout: `${JSON.stringify({
+            result: {
+              worktree: {
+                open_workspace_id: 'w3',
+                path: '/tmp/worktree-3',
+                branch: 'issue-3-herdr-implement',
+              },
+            },
+          })}\n`,
+          stderr: '',
+          status: 0,
+        },
+      },
+    ]),
+  );
+
+  assert.deepEqual(adapter.createWorktree(repo, 'issue-3-herdr-implement', 'issue-3'), {
+    workspaceId: 'w3',
+    worktreePath: '/tmp/worktree-3',
+    branchName: 'issue-3-herdr-implement',
   });
 });
 
@@ -225,6 +268,40 @@ test('adapter owns daemon pane launch, pane commands, and role agent launching',
   );
   adapter.sendPrompt('issue-1-implementer', 'prompt text');
   adapter.submitPrompt('pane-impl');
+});
+
+test('createDaemonPane accepts the live tab create payload and returns the root pane', async () => {
+  const repo = await tempRepo();
+  const adapter = createHerdrAdapter(
+    createRunner([
+      {
+        args: ['tab', 'create', '--workspace', 'w1', '--cwd', repo.rootPath, '--label', 'herdr-implement-daemon', '--focus'],
+        result: {
+          stdout: `${JSON.stringify({
+            id: 'cli:tab:create',
+            result: {
+              root_pane: {
+                pane_id: 'pane-daemon',
+                tab_id: 'tab-daemon',
+                terminal_id: 'term-daemon',
+              },
+              tab: {
+                tab_id: 'tab-daemon',
+              },
+            },
+          })}\n`,
+          stderr: '',
+          status: 0,
+        },
+      },
+    ]),
+  );
+
+  assert.deepEqual(adapter.createDaemonPane('w1', repo.rootPath), {
+    tabId: 'tab-daemon',
+    paneId: 'pane-daemon',
+    terminalId: 'term-daemon',
+  });
 });
 
 test('adapter launches claude-backed agents with the provider seam argv tail', async () => {
