@@ -1,6 +1,6 @@
 # Herdr Implement
 
-`herdr-implement` validates the daemon-oriented Herdr issue workflow and can dry-run the selected workflow graph without creating worktrees, launching agents, committing, pushing, opening PRs, or polling external services.
+`herdr-implement` is the daemon-driven Herdr implementation lifecycle. It creates or recovers the worktree, launches the daemon, verifies startup health, and can also dry-run the selected workflow graph without creating worktrees, launching agents, committing, pushing, opening PRs, or polling external services.
 
 Implementation lives in `src/`, thin command entrypoints live in `bin/`, built-in Workflow Scripts live in `workflow-scripts/`, and the Skill Test Harness lives in `test/`.
 
@@ -13,6 +13,12 @@ node skills/herdr-implement/bin/dry-run.ts --issue <issue-number-or-url>
 ```
 
 The dry-run helper selects either `skills/herdr-implement/workflows/default.yaml` or a project-level `.agent/herdr-workflow.yaml`, validates it, and prints the normalized graph.
+
+## Implementation Lifecycle
+
+The main `bootstrap.ts` entrypoint is for existing issues only. It is the primary implementation path, and it writes state, starts or recovers the daemon, checks health, and prints a JSON summary.
+
+If health is `healthy`, the daemon owns the rest of the lifecycle and the caller should step back. If health is `timed-out` or `pane-exited`, the JSON diagnostics identify the worktree, workspace, pane, and state paths so the caller can treat the run as blocked.
 
 ## End-to-End Validation
 

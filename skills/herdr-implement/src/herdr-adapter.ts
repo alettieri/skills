@@ -59,6 +59,8 @@ export type HerdrAgentInfo = {
 };
 
 export type HerdrAdapter = {
+  findWorktreeByBranch(repository: RepositoryInfo, branchName: string): WorktreeInfo | null;
+  createWorktree(repository: RepositoryInfo, branchName: string, issueLabel: string): WorktreeInfo;
   ensureWorktree(repository: RepositoryInfo, branchName: string, issueLabel: string): WorktreeInfo;
   createDaemonPane(workspaceId: string, worktreePath: string): HerdrPaneInfo;
   getPaneInfo(paneId: string): HerdrPaneInfo | null;
@@ -630,12 +632,11 @@ function chooseWorktreeRecord(
   return normalizeWorktreeRecord(record, label);
 }
 
-function createWorktreeIfNeeded(
+function findWorktreeByBranch(
   runner: HerdrCommandRunner,
   repository: RepositoryInfo,
   branchName: string,
-  issueLabel: string,
-): WorktreeInfo {
+): WorktreeInfo | null {
   const worktreeList = parseWorktreeListOutput(unwrapHerdrResult(safeRunHerdrJson(runner, buildWorktreeListArgs(repository.rootPath))));
   const existing = chooseWorktreeRecord(worktreeList, branchName, 'worktree list');
   if (existing) {
@@ -646,6 +647,15 @@ function createWorktreeIfNeeded(
     };
   }
 
+  return null;
+}
+
+function createWorktree(
+  runner: HerdrCommandRunner,
+  repository: RepositoryInfo,
+  branchName: string,
+  issueLabel: string,
+): WorktreeInfo {
   const created = unwrapHerdrResult(safeRunHerdrJson(runner, buildWorktreeCreateArgs(repository, branchName, issueLabel)));
   const createdRecord = normalizeWorktreeRecord(parseWorktreeCreateOutput(created), 'worktree create');
 
@@ -895,8 +905,14 @@ function readAgentTranscript(runner: HerdrCommandRunner, agentName: string): str
 
 export function createHerdrAdapter(runner: HerdrCommandRunner = buildDefaultRunner()): HerdrAdapter {
   return {
+    findWorktreeByBranch(repository: RepositoryInfo, branchName: string): WorktreeInfo | null {
+      return findWorktreeByBranch(runner, repository, branchName);
+    },
+    createWorktree(repository: RepositoryInfo, branchName: string, issueLabel: string): WorktreeInfo {
+      return createWorktree(runner, repository, branchName, issueLabel);
+    },
     ensureWorktree(repository: RepositoryInfo, branchName: string, issueLabel: string): WorktreeInfo {
-      return createWorktreeIfNeeded(runner, repository, branchName, issueLabel);
+      return findWorktreeByBranch(runner, repository, branchName) ?? createWorktree(runner, repository, branchName, issueLabel);
     },
     createDaemonPane(workspaceId: string, worktreePath: string): HerdrPaneInfo {
       return createDaemonPane(runner, workspaceId, worktreePath);

@@ -9,6 +9,7 @@ import {
   daemonStep,
   readDaemonHandleState,
   readWorkflowRunState,
+  writeWorkflowRunState,
   type DaemonStepResult,
 } from '../src/runtime.ts';
 import type { HerdrAdapter, HerdrAgentInfo, HerdrPaneInfo, RepositoryInfo, WorktreeInfo } from '../src/herdr-adapter.ts';
@@ -56,7 +57,16 @@ class DefaultWorkflowFakeHerdr implements HerdrAdapter {
     this.agentPlans = agentPlans;
   }
 
-  ensureWorktree(_repository: RepositoryInfo, branchName: string, issueLabel: string): WorktreeInfo {
+  findWorktreeByBranch(_repository: RepositoryInfo, branchName: string): WorktreeInfo | null {
+    if (this.worktreeCreations.length === 0) {
+      return null;
+    }
+
+    const worktree = this.worktreeCreations[0];
+    return worktree.branchName === branchName ? worktree : null;
+  }
+
+  createWorktree(_repository: RepositoryInfo, branchName: string, issueLabel: string): WorktreeInfo {
     const worktree = {
       workspaceId: 'w-e2e',
       worktreePath: this.worktreePath,
@@ -72,6 +82,10 @@ class DefaultWorkflowFakeHerdr implements HerdrAdapter {
     return worktree;
   }
 
+  ensureWorktree(repository: RepositoryInfo, branchName: string, issueLabel: string): WorktreeInfo {
+    return this.findWorktreeByBranch(repository, branchName) ?? this.createWorktree(repository, branchName, issueLabel);
+  }
+
   createDaemonPane(workspaceId: string): HerdrPaneInfo {
     return {
       tabId: `${workspaceId}:daemon`,
@@ -82,6 +96,14 @@ class DefaultWorkflowFakeHerdr implements HerdrAdapter {
 
   getPaneInfo(paneId: string): HerdrPaneInfo | null {
     if (paneId === 'w-e2e:daemon-pane') {
+      const runStatePath = join(this.worktreePath, '.agent/herdr-workflow-run.json');
+      const current = readWorkflowRunState(runStatePath);
+      if (current) {
+        writeWorkflowRunState(runStatePath, {
+          ...current,
+          updatedAt: new Date().toISOString(),
+        });
+      }
       return {
         tabId: 'w-e2e:daemon',
         paneId,
@@ -283,9 +305,12 @@ async function makeScenario(options: ScenarioOptions): Promise<{
   runToTerminal: () => DaemonStepResult[];
 }> {
   const repo = mkdtempSync(join(tmpdir(), 'herdr-implement-default-e2e-'));
+  const origin = mkdtempSync(join(tmpdir(), 'herdr-implement-default-e2e-origin-'));
+  git(origin, ['init', '--bare']);
   git(repo, ['init', '-b', 'main']);
   git(repo, ['config', 'user.email', 'test@example.com']);
   git(repo, ['config', 'user.name', 'Test User']);
+  git(repo, ['remote', 'add', 'origin', origin]);
   writeFileSync(join(repo, 'README.md'), 'fixture\n', 'utf8');
   mkdirSync(join(repo, '.agent/prompts'), { recursive: true });
   mkdirSync(join(repo, '.agent/workflow-scripts'), { recursive: true });
@@ -300,9 +325,12 @@ async function makeScenario(options: ScenarioOptions): Promise<{
   installScripts(repo, options);
   git(repo, ['add', '.']);
   git(repo, ['commit', '-m', 'initial']);
+  git(repo, ['push', '-u', 'origin', 'main']);
+  git(repo, ['fetch', 'origin', 'main']);
+  git(repo, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
 
   const adapter = new DefaultWorkflowFakeHerdr(repo, structuredClone(options.agentPlans));
-  bootstrap({
+  await bootstrap({
     cwd: repo,
     issue: `#${options.issueNumber ?? 24}`,
     adapter,
@@ -491,7 +519,7 @@ test('default workflow E2E recovers from bootstrap restart without duplicate sid
   assert.equal(eventsBeforeRestart.filter((event) => event.type === 'script' && event.phase === 'push_branch').length, 1);
   assert.equal(eventsBeforeRestart.filter((event) => event.type === 'script' && event.phase === 'create_pr').length, 1);
 
-  const secondBootstrap = bootstrap({
+  const secondBootstrap = await bootstrap({
     cwd: scenario.repo,
     issue: '#24',
     adapter: scenario.adapter,
@@ -503,7 +531,7 @@ test('default workflow E2E recovers from bootstrap restart without duplicate sid
   scenario.runToTerminal();
 
   assert.equal(terminalPhase(scenario.repo), 'complete');
-  assert.equal(scenario.adapter.worktreeEnsures.length, 2);
+  assert.equal(scenario.adapter.worktreeEnsures.length, 1);
   assert.equal(scenario.adapter.worktreeCreations.length, 1);
   assert.equal(scenario.adapter.daemonCommands.length, 1);
   const events = readEvents(scenario.repo);

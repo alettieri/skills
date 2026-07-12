@@ -1,14 +1,33 @@
 ---
 name: herdr-implement
-description: Validate the declarative workflow schema for daemon-driven issue implementation from an existing issue number or URL, then dry-run the selected workflow without creating worktrees or launching agents.
+description: Promote an existing issue into a daemon-driven Herdr implementation run that creates or recovers the worktree, starts the daemon, verifies startup health, and prints a JSON summary.
 ---
 
-Use this skill only when the user has already provided an existing issue number or URL. This skill validates the workflow schema and prints the effective workflow for dry-run inspection. It does not create worktrees, launch Herdr agents, run the daemon loop, commit, push, create PRs, or perform any other side effects.
+Use this skill when the user references an existing issue, ticket, or URL and wants the implementation lifecycle started inside Herdr. The skill creates or recovers the worktree, writes the durable state, launches the daemon that owns the lifecycle, confirms startup health, and prints a JSON summary.
+
+`herdr-implement` is the daemon-driven deterministic state-machine lifecycle. `herdr-worktree-flow` is the live-agent orchestrator.
+
+## When to use
+
+- Use it only for an existing issue reference.
+- If the user has not provided an issue reference, ask for one and do not create a new issue.
+- Extract the tightest identifier you can from the user's reference and pass that to `bootstrap`.
+
+## Lifecycle
+
+- `bootstrap.ts` requires `HERDR_ENV=1` and a non-empty `--issue`.
+- `--help` works without `HERDR_ENV` and should describe the side effects up front.
+- `dry-run.ts` stays read-only and can be used for workflow inspection and validation.
+- `bootstrap` normalizes the issue reference, detects the repository, loads the workflow, and either recovers an existing worktree by branch or creates a new one after preflight.
+- After launch or recovery, `bootstrap` waits for daemon health, then prints a JSON summary with `slug`, `mode`, `health`, `currentPhase`, and `nextInspectionCommand`.
+- If health is `healthy`, step back after reporting the summary. The daemon now owns the lifecycle.
+- If health is `timed-out` or `pane-exited`, surface the diagnostics as a blocker instead of blindly re-running.
+- Re-invoking the same issue reference should recover a stalled or dead daemon when the worktree already exists.
 
 ## Inputs
 
-- An existing issue number or URL.
-- Optional repository override workflow at `.agent/herdr-workflow.yaml`.
+- An existing issue number, ticket key, or issue URL.
+- Optional project workflow override at `.agent/herdr-workflow.yaml`.
 
 ## Workflow Source
 
