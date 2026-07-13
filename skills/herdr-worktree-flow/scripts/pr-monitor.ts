@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { mkdir, writeFile, rename } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SpawnSyncReturns } from 'node:child_process';
+import { createPrHostProvider } from './pr-host-provider.ts';
 import {
   HelpRequested,
   classifySnapshot,
@@ -12,9 +13,7 @@ import {
   formatText,
   maxTimestamp,
   normalizeBaselineFingerprint,
-  normalizeCheckResultsPayload,
   normalizeHerdrAgentTarget,
-  normalizePullRequestPayload,
   normalizeNotifiedFingerprint,
   parseArgs,
 } from './pr-monitor-domain.ts';
@@ -40,6 +39,7 @@ function logStartup(args: MonitorArgs): void {
       `interval=${args.intervalSeconds}`,
       `once=${args.once}`,
       `quiet=${args.quiet}`,
+      `provider=${formatArgsValue(args.provider)}`,
       `pr=${formatArgsValue(args.prRef)}`,
       `repo=${formatArgsValue(args.repo)}`,
       `stateFile=${formatArgsValue(args.stateFile)}`,
@@ -82,11 +82,26 @@ function herdrReturnDelayMs(): number {
   return parsed;
 }
 
+function parsePositiveIntegerEnv(name: string): number | null {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') {
+    return null;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
 export function printHelp(): void {
   process.stdout.write(`Usage: pr-monitor.ts [options]\n\n`);
   process.stdout.write(`Options:\n`);
   process.stdout.write(`  --pr <ref>          PR number, URL, or branch name. Defaults to current branch.\n`);
   process.stdout.write(`  --repo <owner/repo> GitHub repository override for gh.\n`);
+  process.stdout.write(`  --provider <name>   PR host provider to use. Default: github.\n`);
   process.stdout.write(`  --interval <sec>    Poll interval in seconds. Default: 30.\n`);
   process.stdout.write(`  --state-file <path> Write the latest snapshot to a JSON state file.\n`);
   process.stdout.write(`  --notify-target <target>\n`);
@@ -96,62 +111,6 @@ export function printHelp(): void {
   process.stdout.write(`  --quiet             Only emit when the snapshot changes.\n`);
   process.stdout.write(`  --once              Take one snapshot and exit.\n`);
   process.stdout.write(`  -h, --help          Show this help.\n`);
-}
-
-function ghBaseArgs(repo: string | null): string[] {
-  return repo ? ['-R', repo] : [];
-}
-
-function runGh(args: string[], repo: string | null): CommandResult {
-  const result = spawnSync('gh', [...ghBaseArgs(repo), ...args], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  if (result.error) {
-    if ('code' in result.error && result.error.code === 'ENOENT') {
-      throw new Error('gh is not installed or not on PATH');
-    }
-    throw result.error;
-  }
-
-  return result;
-}
-
-function runGhJson(args: string[], repo: string | null, acceptableStatuses = new Set([0])): unknown {
-  const result = runGh(args, repo);
-  if (result.status === null || !acceptableStatuses.has(result.status)) {
-    throw new Error(`gh ${args.join(' ')} failed with exit ${result.status}: ${result.stderr.trim()}`);
-  }
-
-  const stdout = result.stdout.trim();
-  if (!stdout) {
-    return null;
-  }
-
-  return JSON.parse(stdout) as unknown;
-}
-
-function isNoChecksReportedResult(result: CommandResult): boolean {
-  return result.status === 1 && result.stderr.trim().includes('no checks reported');
-}
-
-function runGhChecksJson(args: string[], repo: string | null): unknown {
-  const result = runGh(args, repo);
-  if (isNoChecksReportedResult(result)) {
-    logStderr(`pr-monitor gh checks normalized empty: ${result.stderr.trim()}`);
-    return [];
-  }
-  if (result.status === null || !new Set([0, 8]).has(result.status)) {
-    throw new Error(`gh ${args.join(' ')} failed with exit ${result.status}: ${result.stderr.trim()}`);
-  }
-
-  const stdout = result.stdout.trim();
-  if (!stdout) {
-    return null;
-  }
-
-  return JSON.parse(stdout) as unknown;
 }
 
 function runHerdr(args: string[], acceptableStatuses = new Set([0])): CommandResult {
@@ -236,32 +195,9 @@ function loadNotifiedFingerprint(stateFile: string | null): string | null {
 }
 
 async function snapshot(args: MonitorArgs): Promise<MonitorReport> {
-  const prFields = [
-    'number',
-    'url',
-    'state',
-    'mergedAt',
-    'closedAt',
-    'reviewDecision',
-    'updatedAt',
-    'title',
-    'comments',
-    'reviews',
-  ].join(',');
-
-  const prViewArgs = ['pr', 'view'];
-  if (args.prRef) {
-    prViewArgs.push(args.prRef);
-  }
-  prViewArgs.push('--json', prFields);
-
-  const pr = normalizePullRequestPayload(runGhJson(prViewArgs, args.repo));
-  const checks = normalizeCheckResultsPayload(
-    runGhChecksJson(
-      ['pr', 'checks', ...(args.prRef ? [args.prRef] : []), '--json', 'bucket,state,name,workflow,description,link'],
-      args.repo,
-    ),
-  );
+  const provider = createPrHostProvider(args.provider);
+  const pr = provider.fetchPullRequest(args.prRef, args.repo);
+  const checks = provider.fetchChecks(args.prRef, args.repo);
 
   return classifySnapshot({
     prNumber: pr.number,
@@ -314,6 +250,10 @@ async function main(): Promise<void> {
   let notifiedFingerprint = loadNotifiedFingerprint(args.stateFile);
   let lastFingerprint = baselineFingerprint;
   const notifyMode = Boolean(args.notifyTarget);
+  const testExitAfterNotifications = parsePositiveIntegerEnv('PR_MONITOR_TEST_EXIT_AFTER_NOTIFICATIONS');
+  const testExitAfterPolls = parsePositiveIntegerEnv('PR_MONITOR_TEST_EXIT_AFTER_POLLS');
+  let completedNotifications = 0;
+  let completedPolls = 0;
 
   logStartup(args);
 
@@ -335,6 +275,12 @@ async function main(): Promise<void> {
           await sendNotification(args.notifyTarget as string, body);
           await writeStateFile(args.stateFile, report, report.fingerprint);
           notifiedFingerprint = report.fingerprint;
+          completedNotifications += 1;
+
+          if (testExitAfterNotifications !== null && completedNotifications >= testExitAfterNotifications) {
+            logDecision(`exit-test-notifications count=${completedNotifications}`);
+            process.exit(0);
+          }
 
           if (report.terminal) {
             logDecision('exit-terminal');
@@ -348,6 +294,11 @@ async function main(): Promise<void> {
         }
       }
       logDecision('continue');
+      completedPolls += 1;
+      if (testExitAfterPolls !== null && completedPolls >= testExitAfterPolls) {
+        logDecision(`exit-test-polls count=${completedPolls}`);
+        process.exit(0);
+      }
     } else {
       logDecision('write-state-and-evaluate');
       await writeStateFile(args.stateFile, report);

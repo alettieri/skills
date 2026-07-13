@@ -4,7 +4,9 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { SpawnSyncReturns } from 'node:child_process';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
@@ -14,6 +16,14 @@ type MonitorRunOptions = {
   env?: Record<string, string>;
   fakeBin?: string;
   timeoutMs?: number;
+};
+
+type MonitorWaitOptions = MonitorRunOptions & {
+  stopWhen: (snapshot: { stdout: string; stderr: string; commands: Array<{ cmd: string; args: string[] }> }) => boolean;
+  pollMs?: number;
+  maxWaitMs?: number;
+  settleMs?: number;
+  stateFile?: string;
 };
 
 function makeFixture(): { dir: string; fakeBin: string; logFile: string } {
@@ -132,6 +142,69 @@ function runMonitor(args: string[], options: MonitorRunOptions = {}): MonitorRun
   }) as MonitorRunResult;
 }
 
+async function runMonitorUntil(args: string[], options: MonitorWaitOptions): Promise<MonitorRunResult> {
+  const child = spawn(process.execPath, [monitorEntry, ...args], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      PATH: options.fakeBin ? `${options.fakeBin}:${process.env.PATH}` : process.env.PATH,
+      ...options.env,
+    },
+  });
+
+  const stdoutChunks: string[] = [];
+  const stderrChunks: string[] = [];
+  child.stdout?.setEncoding('utf8');
+  child.stderr?.setEncoding('utf8');
+  child.stdout?.on('data', (chunk: string) => {
+    stdoutChunks.push(chunk);
+  });
+  child.stderr?.on('data', (chunk: string) => {
+    stderrChunks.push(chunk);
+  });
+
+  let spawnError: Error & { code?: string } | null = null;
+  child.on('error', (error: Error & { code?: string }) => {
+    spawnError = error;
+  });
+
+  const closePromise = once(child, 'close');
+  const pollMs = options.pollMs ?? 25;
+  const maxWaitMs = options.maxWaitMs ?? 10_000;
+  const startedAt = Date.now();
+
+  while (child.exitCode === null && child.signalCode === null) {
+    const snapshot = {
+      stdout: stdoutChunks.join(''),
+      stderr: stderrChunks.join(''),
+      commands: readCommandsMaybe(options.env?.PR_MONITOR_COMMAND_LOG),
+      stateText: readTextMaybe(options.stateFile),
+    };
+
+    if (options.stopWhen(snapshot)) {
+      await delay(options.settleMs ?? 100);
+      child.kill('SIGTERM');
+      break;
+    }
+
+    if (Date.now() - startedAt > maxWaitMs) {
+      child.kill('SIGTERM');
+      throw new Error(`monitor did not reach stop condition within ${maxWaitMs}ms`);
+    }
+
+    await delay(pollMs);
+  }
+
+  const [code, signal] = (await closePromise) as [number | null, NodeJS.Signals | null];
+  return {
+    status: code,
+    signal,
+    stdout: stdoutChunks.join(''),
+    stderr: stderrChunks.join(''),
+    error: spawnError ?? undefined,
+  } as MonitorRunResult;
+}
+
 function readCommands(logFile: string): Array<{ cmd: string; args: string[] }> {
   return readFileSync(logFile, 'utf8')
     .trim()
@@ -140,11 +213,36 @@ function readCommands(logFile: string): Array<{ cmd: string; args: string[] }> {
     .map((line) => JSON.parse(line) as { cmd: string; args: string[] });
 }
 
+function readCommandsMaybe(logFile?: string): Array<{ cmd: string; args: string[] }> {
+  if (!logFile) {
+    return [];
+  }
+
+  try {
+    return readCommands(logFile);
+  } catch {
+    return [];
+  }
+}
+
+function readTextMaybe(path?: string): string | null {
+  if (!path) {
+    return null;
+  }
+
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
 test('CLI --help exits successfully and prints usage', () => {
   const result = runMonitor(['--help']);
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /Usage: pr-monitor\.ts \[options\]/);
+  assert.match(result.stdout, /--provider <name>/);
   assert.match(result.stdout, /--notify-target <target>/);
   assert.equal(result.stderr, '');
 });
@@ -217,7 +315,7 @@ test('CLI treats gh no-checks-reported failures as an empty check list', () => {
   assert.equal(result.status, 0);
   assert.match(result.stderr, /pr-monitor start/);
   assert.match(result.stderr, /pr-monitor poll/);
-  assert.match(result.stderr, /pr-monitor gh checks normalized empty:/);
+  assert.match(result.stderr, /pr-host-provider gh checks normalized empty:/);
   assert.match(result.stderr, /pr-monitor decision write-state-and-evaluate/);
   assert.match(result.stderr, /pr-monitor decision exit-once/);
   const report = JSON.parse(result.stdout);
@@ -243,7 +341,7 @@ test('CLI emits stderr diagnostics when gh no-checks is normalized', () => {
   assert.equal(result.status, 0);
   assert.match(result.stderr, /pr-monitor start/);
   assert.match(result.stderr, /pr-monitor poll/);
-  assert.match(result.stderr, /pr-monitor gh checks normalized empty:/);
+  assert.match(result.stderr, /pr-host-provider gh checks normalized empty:/);
   assert.match(result.stderr, /pr-monitor decision write-state-and-evaluate/);
   assert.match(result.stderr, /pr-monitor decision exit-once/);
 });
@@ -253,16 +351,15 @@ test('CLI notification mode sends for feedback-only reviews with passing checks'
   const stateFile = join(fixture.dir, 'state', 'pr-monitor.json');
   const result = runMonitor(['--pr', '42', '--state-file', stateFile, '--notify-target', 'issue-orchestrator'], {
     fakeBin: fixture.fakeBin,
-    timeoutMs: 1500,
     env: {
       PR_MONITOR_COMMAND_LOG: fixture.logFile,
       PR_MONITOR_SCENARIO: 'pass',
       PR_MONITOR_HERDR_RETURN_DELAY_MS: '10',
+      PR_MONITOR_TEST_EXIT_AFTER_NOTIFICATIONS: '1',
     },
   });
 
-  assert.equal(result.status, null);
-  assert.equal(result.error?.code, 'ETIMEDOUT');
+  assert.equal(result.status, 0);
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /pr-monitor start/);
   assert.match(result.stderr, /pr-monitor poll/);
@@ -295,15 +392,14 @@ test('CLI notify mode does not resend a duplicate actionable snapshot from the l
 
   const seed = runMonitor(['--pr', '42', '--state-file', stateFile, '--notify-target', 'issue-orchestrator'], {
     fakeBin: fixture.fakeBin,
-    timeoutMs: 1500,
     env: {
       PR_MONITOR_COMMAND_LOG: fixture.logFile,
       PR_MONITOR_SCENARIO: 'pass',
+      PR_MONITOR_TEST_EXIT_AFTER_NOTIFICATIONS: '1',
     },
   });
 
-  assert.equal(seed.status, null);
-  assert.equal(seed.error?.code, 'ETIMEDOUT');
+  assert.equal(seed.status, 0);
   const seededState = JSON.parse(readFileSync(stateFile, 'utf8'));
   assert.equal(seededState.notifiedFingerprint, seededState.fingerprint);
 
@@ -311,16 +407,14 @@ test('CLI notify mode does not resend a duplicate actionable snapshot from the l
 
   const result = runMonitor(['--interval', '0.05', '--pr', '42', '--state-file', stateFile, '--notify-target', 'issue-orchestrator'], {
     fakeBin: fixture.fakeBin,
-    timeoutMs: 500,
     env: {
       PR_MONITOR_COMMAND_LOG: fixture.logFile,
       PR_MONITOR_SCENARIO: 'pass',
+      PR_MONITOR_TEST_EXIT_AFTER_POLLS: '1',
     },
   });
 
-  assert.equal(result.status, null);
-  assert.equal(result.error?.name, 'Error');
-  assert.equal(result.error?.code, 'ETIMEDOUT');
+  assert.equal(result.status, 0);
   assert.match(result.stderr, /pr-monitor start/);
   assert.match(result.stderr, /pr-monitor poll/);
   assert.match(result.stderr, /reasons=feedback_present/);
@@ -334,32 +428,45 @@ test('CLI notify mode does not resend a duplicate actionable snapshot from the l
 test('CLI notify mode sends again when a later actionable fingerprint changes', () => {
   const fixture = makeFixture();
   const stateFile = join(fixture.dir, 'state', 'pr-monitor.json');
-  const result = runMonitor(['--interval', '0.05', '--pr', '42', '--state-file', stateFile, '--notify-target', 'issue-orchestrator'], {
+  const first = runMonitor(['--pr', '42', '--state-file', stateFile, '--notify-target', 'issue-orchestrator'], {
     fakeBin: fixture.fakeBin,
-    timeoutMs: 900,
     env: {
       PR_MONITOR_COMMAND_LOG: fixture.logFile,
-      PR_MONITOR_SCENARIO_SEQUENCE: 'pass,changes',
       PR_MONITOR_HERDR_RETURN_DELAY_MS: '0',
+      PR_MONITOR_SCENARIO: 'pass',
+      PR_MONITOR_TEST_EXIT_AFTER_NOTIFICATIONS: '1',
     },
   });
 
-  assert.equal(result.status, null);
-  assert.equal(result.error?.code, 'ETIMEDOUT');
+  assert.equal(first.status, 0);
+  assert.match(first.stderr, /pr-monitor decision notify-ready target=issue-orchestrator/);
+
+  writeFileSync(fixture.logFile, '');
+
+  const result = runMonitor(['--interval', '0.05', '--pr', '42', '--state-file', stateFile, '--notify-target', 'issue-orchestrator'], {
+    fakeBin: fixture.fakeBin,
+    env: {
+      PR_MONITOR_COMMAND_LOG: fixture.logFile,
+      PR_MONITOR_SCENARIO: 'changes',
+      PR_MONITOR_HERDR_RETURN_DELAY_MS: '0',
+      PR_MONITOR_TEST_EXIT_AFTER_NOTIFICATIONS: '1',
+    },
+  });
+
+  assert.equal(result.status, 0);
   assert.match(result.stderr, /pr-monitor decision notify-ready target=issue-orchestrator/);
 
   const commands = readCommands(fixture.logFile).filter((command) => command.cmd === 'herdr');
   const sends = commands.filter((command) => command.args[0] === 'agent' && command.args[1] === 'send');
-  assert.equal(sends.length, 2);
-  assert.match(sends[0].args[3], /Reason: feedback_present/);
-  assert.match(sends[1].args[3], /Reason: changes_requested/);
+  assert.equal(sends.length, 1);
+  assert.match(sends[0].args[3], /Reason: changes_requested/);
 
   const state = JSON.parse(readFileSync(stateFile, 'utf8'));
   assert.equal(state.reviewDecision, 'CHANGES_REQUESTED');
   assert.equal(state.notifiedFingerprint, state.fingerprint);
 });
 
-test('CLI notify mode retries after Herdr send fails before notified marker is written', () => {
+test('CLI notify mode retries after Herdr send fails before notified marker is written', async () => {
   const fixture = makeFixture();
   const stateFile = join(fixture.dir, 'state', 'pr-monitor.json');
 
@@ -380,17 +487,18 @@ test('CLI notify mode retries after Herdr send fails before notified marker is w
 
   writeFileSync(fixture.logFile, '');
 
-  const second = runMonitor(['--pr', '42', '--state-file', stateFile, '--notify-target', 'issue-orchestrator'], {
+  const second = await runMonitorUntil(['--pr', '42', '--state-file', stateFile, '--notify-target', 'issue-orchestrator'], {
     fakeBin: fixture.fakeBin,
-    timeoutMs: 1500,
     env: {
       PR_MONITOR_COMMAND_LOG: fixture.logFile,
       PR_MONITOR_SCENARIO: 'pass',
     },
+    stopWhen(snapshot) {
+      return snapshot.stderr.includes('pr-monitor decision sent-return pane=pane-1');
+    },
   });
 
-  assert.equal(second.status, null);
-  assert.equal(second.error?.code, 'ETIMEDOUT');
+  assert.equal(second.signal, 'SIGTERM');
   const commands = readCommands(fixture.logFile).filter((command) => command.cmd === 'herdr');
   assert.equal(commands.length, 3);
   assert.deepEqual(commands[0].args, ['agent', 'get', 'issue-orchestrator']);
