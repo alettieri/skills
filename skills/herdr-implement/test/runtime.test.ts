@@ -2507,7 +2507,7 @@ test('daemon step lazily starts a role agent and records a pending run', async (
       result: { stdout: '', stderr: '', status: 0 },
     },
     {
-      args: ['pane', 'send-keys', 'pane-impl', 'Return'],
+      args: ['pane', 'send-keys', 'pane-impl', 'Enter'],
       result: { stdout: '', stderr: '', status: 0 },
     },
   ]);
@@ -2577,7 +2577,7 @@ test('daemon step reuses a recorded role agent when reuse is true', async () => 
       result: { stdout: '', stderr: '', status: 0 },
     },
     {
-      args: ['pane', 'send-keys', 'pane-impl', 'Return'],
+      args: ['pane', 'send-keys', 'pane-impl', 'Enter'],
       result: { stdout: '', stderr: '', status: 0 },
     },
   ]);
@@ -2685,7 +2685,7 @@ test('daemon step starts fresh one-off role agents when reuse is false', async (
       result: { stdout: '', stderr: '', status: 0 },
     },
     {
-      args: ['pane', 'send-keys', 'new-pane', 'Return'],
+      args: ['pane', 'send-keys', 'new-pane', 'Enter'],
       result: { stdout: '', stderr: '', status: 0 },
     },
   ]);
@@ -2893,7 +2893,7 @@ test('daemon step rejects malformed result JSON and asks the same role to rewrit
         result: { stdout: '', stderr: '', status: 0 },
       },
       {
-        args: ['pane', 'send-keys', 'pane-impl', 'Return'],
+        args: ['pane', 'send-keys', 'pane-impl', 'Enter'],
         result: { stdout: '', stderr: '', status: 0 },
       },
     ]),
@@ -2968,7 +2968,7 @@ for (const item of invalidArtifactCases) {
           result: { stdout: '', stderr: '', status: 0 },
         },
         {
-          args: ['pane', 'send-keys', 'pane-impl', 'Return'],
+          args: ['pane', 'send-keys', 'pane-impl', 'Enter'],
           result: { stdout: '', stderr: '', status: 0 },
         },
       ]),
@@ -3087,7 +3087,7 @@ test('daemon step inspects an idle agent once and requests the missing artifact'
         result: { stdout: '', stderr: '', status: 0 },
       },
       {
-        args: ['pane', 'send-keys', 'pane-impl', 'Return'],
+        args: ['pane', 'send-keys', 'pane-impl', 'Enter'],
         result: { stdout: '', stderr: '', status: 0 },
       },
     ]),
@@ -3288,7 +3288,7 @@ test('daemon step rejects stale completions for non-active run ids', async () =>
         result: { stdout: '', stderr: '', status: 0 },
       },
       {
-        args: ['pane', 'send-keys', 'pane-impl', 'Return'],
+        args: ['pane', 'send-keys', 'pane-impl', 'Enter'],
         result: { stdout: '', stderr: '', status: 0 },
       },
     ]),

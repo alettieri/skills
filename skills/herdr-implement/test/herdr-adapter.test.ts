@@ -235,7 +235,7 @@ test('adapter owns daemon pane launch, pane commands, and role agent launching',
         result: { stdout: '', stderr: '', status: 0 },
       },
       {
-        args: ['pane', 'send-keys', 'pane-impl', 'Return'],
+        args: ['pane', 'send-keys', 'pane-impl', 'Enter'],
         result: { stdout: '', stderr: '', status: 0 },
       },
     ]),

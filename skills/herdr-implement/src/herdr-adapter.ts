@@ -136,7 +136,7 @@ type HerdrAgentMoveArgs = readonly ['pane', 'move', string, '--new-tab', '--work
 type HerdrPaneGetArgs = readonly ['pane', 'get', string];
 type HerdrPaneReadArgs = readonly ['pane', 'read', string, '--source', 'recent-unwrapped', '--lines', '120'];
 type HerdrAgentSendArgs = readonly ['agent', 'send', string, string];
-type HerdrAgentSendEnterArgs = readonly ['pane', 'send-keys', string, 'Return'];
+type HerdrAgentSendEnterArgs = readonly ['pane', 'send-keys', string, 'Enter'];
 type HerdrAgentGetArgs = readonly ['agent', 'get', string];
 type HerdrAgentReadArgs = readonly ['agent', 'read', string];
 
@@ -590,7 +590,7 @@ function buildAgentSendArgs(agentName: string, prompt: string): HerdrAgentSendAr
 }
 
 function buildAgentSendEnterArgs(paneId: string): HerdrAgentSendEnterArgs {
-  return ['pane', 'send-keys', paneId, 'Return'];
+  return ['pane', 'send-keys', paneId, 'Enter'];
 }
 
 function buildAgentGetArgs(agentName: string): HerdrAgentGetArgs {
