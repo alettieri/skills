@@ -454,6 +454,14 @@ function normalizeArgs(args: string[]): string[] {
   return args.map(normalizeArg);
 }
 
+function ensureDaemonCommandForTest(worktreePath: string): string {
+  return `node skills/herdr-implement/bin/daemon.ts --worktree ${JSON.stringify(worktreePath)} --state .agent/herdr-workflow-run.json --handles .agent/herdr-implement.json`;
+}
+
+function daemonPaneCommandForTest(worktreePath: string): string {
+  return `${ensureDaemonCommandForTest(worktreePath)}; printf '\\nHERDR_IMPLEMENT_DAEMON_EXIT:%s\\n' "$?"`;
+}
+
 function createRunner(expectations: Array<{ args: string[]; result: HerdrCommandResult }>) {
   let index = 0;
   return {
@@ -500,6 +508,9 @@ function createAdapter(overrides: Partial<HerdrAdapter> = {}): HerdrAdapter {
     runPaneCommand() {},
     getPaneInfo() {
       return null;
+    },
+    readPaneTranscript() {
+      return '';
     },
     launchRoleAgent() {
       return {
@@ -945,9 +956,7 @@ test('bootstrap creates worktree-local state and a daemon command that daemon.ts
         'pane',
         'run',
         'pane-1',
-        `node skills/herdr-implement/bin/daemon.ts --worktree ${JSON.stringify(
-          worktreePath,
-        )} --state .agent/herdr-workflow-run.json --handles .agent/herdr-implement.json`,
+        daemonPaneCommandForTest(worktreePath),
       ],
       result: { stdout: '', stderr: '', status: 0 },
     },
@@ -1067,9 +1076,7 @@ test('bootstrap accepts wrapped Herdr worktree create output', async () => {
         'pane',
         'run',
         'pane-1',
-        `node skills/herdr-implement/bin/daemon.ts --worktree ${JSON.stringify(
-          worktreePath,
-        )} --state .agent/herdr-workflow-run.json --handles .agent/herdr-implement.json`,
+        daemonPaneCommandForTest(worktreePath),
       ],
       result: { stdout: '', stderr: '', status: 0 },
     },
@@ -1175,7 +1182,7 @@ test('bootstrap accepts the live tab create payload and records the daemon root 
       },
     },
     {
-      args: ['pane', 'run', 'pane-1', `node skills/herdr-implement/bin/daemon.ts --worktree ${JSON.stringify(worktreePath)} --state .agent/herdr-workflow-run.json --handles .agent/herdr-implement.json`],
+      args: ['pane', 'run', 'pane-1', daemonPaneCommandForTest(worktreePath)],
       result: { stdout: '', stderr: '', status: 0 },
     },
     {
@@ -1276,6 +1283,126 @@ test('bootstrap can be driven through an adapter fake', async () => {
   assert.equal(readDaemonHandleState(result.handleStatePath)?.daemonPaneId, 'pane-1');
 });
 
+test('bootstrap runs post-worktree setup before launching the daemon', async () => {
+  const repo = await makeRepo();
+  const worktreePath = mkdtempSync(join(tmpdir(), 'herdr-bootstrap-worktree-'));
+  await makeWorktreeFixture(worktreePath);
+  const markerPath = join(tmpdir(), `herdr-setup-marker-${process.pid}-${Date.now()}`);
+  const hookPath = join(worktreePath, '.agent/herdr-post-worktree-setup');
+  writeFileSync(
+    hookPath,
+    `#!/usr/bin/env sh
+set -eu
+printf ran > ${JSON.stringify(markerPath)}
+`,
+    'utf8',
+  );
+  chmodSync(hookPath, 0o755);
+  git(worktreePath, ['init', '-b', 'main']);
+  git(worktreePath, ['config', 'user.email', 'test@example.com']);
+  git(worktreePath, ['config', 'user.name', 'Test User']);
+  git(worktreePath, ['add', '.']);
+  git(worktreePath, ['commit', '-m', 'worktree fixture']);
+
+  const result = await bootstrap({
+    cwd: repo,
+    issue: '#16',
+    adapter: createAdapter({
+      findWorktreeByBranch() {
+        return null;
+      },
+      createWorktree() {
+        return {
+          workspaceId: 'w16',
+          worktreePath,
+          branchName: 'issue-16-herdr-implement',
+        };
+      },
+      createDaemonPane() {
+        assert.equal(readFileSync(markerPath, 'utf8'), 'ran');
+        return {
+          tabId: 'tab-1',
+          paneId: 'pane-1',
+          terminalId: null,
+        };
+      },
+      getPaneInfo(paneId) {
+        if (paneId !== 'pane-1') {
+          return null;
+        }
+
+        const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+        const runState = readWorkflowRunState(runStatePath);
+        if (runState) {
+          writeWorkflowRunState(runStatePath, {
+            ...runState,
+            currentPhase: 'ready',
+            updatedAt: '2026-06-30T12:00:01.000Z',
+          });
+        }
+
+        return {
+          tabId: 'tab-1',
+          paneId: 'pane-1',
+          terminalId: null,
+        };
+      },
+      runPaneCommand(_paneId, command) {
+        assert.match(command, /HERDR_IMPLEMENT_DAEMON_EXIT/);
+      },
+    }),
+    now: () => new Date('2026-06-30T12:00:00.000Z'),
+  });
+
+  assert.equal(result.health, 'healthy');
+});
+
+test('bootstrap blocks before daemon launch when post-worktree setup fails', async () => {
+  const repo = await makeRepo();
+  const worktreePath = mkdtempSync(join(tmpdir(), 'herdr-bootstrap-worktree-'));
+  await makeWorktreeFixture(worktreePath);
+  const hookPath = join(worktreePath, '.agent/herdr-post-worktree-setup');
+  writeFileSync(
+    hookPath,
+    `#!/usr/bin/env sh
+exit 7
+`,
+    'utf8',
+  );
+  chmodSync(hookPath, 0o755);
+  git(worktreePath, ['init', '-b', 'main']);
+  git(worktreePath, ['config', 'user.email', 'test@example.com']);
+  git(worktreePath, ['config', 'user.name', 'Test User']);
+  git(worktreePath, ['add', '.']);
+  git(worktreePath, ['commit', '-m', 'worktree fixture']);
+  let launched = false;
+
+  await assert.rejects(
+    bootstrap({
+      cwd: repo,
+      issue: '#16',
+      adapter: createAdapter({
+        findWorktreeByBranch() {
+          return null;
+        },
+        createWorktree() {
+          return {
+            workspaceId: 'w16',
+            worktreePath,
+            branchName: 'issue-16-herdr-implement',
+          };
+        },
+        createDaemonPane() {
+          launched = true;
+          throw new Error('not expected');
+        },
+      }),
+    }),
+    /post-worktree setup hook exited with status 7/,
+  );
+  assert.equal(launched, false);
+});
+
 test('bootstrap recovery reuses existing worktree-local state for the requested issue', async () => {
   const repo = await makeRepo();
   const repoRoot = realpathSync(repo);
@@ -1299,6 +1426,14 @@ test('bootstrap recovery reuses existing worktree-local state for the requested 
       args: ['pane', 'get', 'pane-1'],
       result: {
         stdout: `${JSON.stringify({ result: { pane: { pane_id: 'pane-1', tab_id: 'tab-1', terminal_id: 'term-1' } } })}\n`,
+        stderr: '',
+        status: 0,
+      },
+    },
+    {
+      args: ['pane', 'read', 'pane-1', '--source', 'recent-unwrapped', '--lines', '120'],
+      result: {
+        stdout: `${JSON.stringify({ result: { read: { text: 'daemon still running' } } })}\n`,
         stderr: '',
         status: 0,
       },
@@ -1409,6 +1544,14 @@ test('bootstrap recovery accepts snake-case Herdr workspace ids', async () => {
       },
     },
     {
+      args: ['pane', 'read', 'pane-1', '--source', 'recent-unwrapped', '--lines', '120'],
+      result: {
+        stdout: `${JSON.stringify({ result: { read: { text: 'daemon still running' } } })}\n`,
+        stderr: '',
+        status: 0,
+      },
+    },
+    {
       args: ['pane', 'get', 'pane-1'],
       result: {
         stdout: `${JSON.stringify({ result: { pane: { pane_id: 'pane-1', tab_id: 'tab-1', terminal_id: 'term-1' } } })}\n`,
@@ -1466,9 +1609,7 @@ test('bootstrap replaces an unhealthy recorded daemon pane before reusing handle
         'pane',
         'run',
         'pane-2',
-        `node skills/herdr-implement/bin/daemon.ts --worktree ${JSON.stringify(
-          worktreePath,
-        )} --state .agent/herdr-workflow-run.json --handles .agent/herdr-implement.json`,
+        daemonPaneCommandForTest(worktreePath),
       ],
       result: { stdout: '', stderr: '', status: 0 },
     },
@@ -1487,6 +1628,81 @@ test('bootstrap replaces an unhealthy recorded daemon pane before reusing handle
   assert.equal(result.mode, 'recovery');
   assert.equal(result.health, 'healthy');
   assert.equal(result.daemonPaneId, 'pane-2');
+  assert.equal(readDaemonHandleState(result.handleStatePath)?.daemonPaneId, 'pane-2');
+});
+
+test('bootstrap recovery replaces a recorded pane whose daemon command exited', async () => {
+  const repo = await makeRepo();
+  const worktreePath = mkdtempSync(join(tmpdir(), 'herdr-bootstrap-worktree-'));
+  await makeWorktreeFixture(worktreePath);
+  writeWorkflowRunState(join(worktreePath, '.agent/herdr-workflow-run.json'), workflowStateFixture(worktreePath, 16, 'setup'));
+  writeDaemonHandleState(join(worktreePath, '.agent/herdr-implement.json'), handleStateFixture(worktreePath, 16, 'tab-1', 'pane-1'));
+  const daemonCommands: Array<{ paneId: string; command: string }> = [];
+
+  const result = await bootstrap({
+    cwd: repo,
+    issue: '#16',
+    adapter: createAdapter({
+      findWorktreeByBranch(_repository, branchName) {
+        assert.equal(branchName, 'issue-16-herdr-implement');
+        return {
+          workspaceId: 'w16',
+          worktreePath,
+          branchName,
+        };
+      },
+      getPaneInfo(paneId) {
+        if (paneId === 'pane-1') {
+          return {
+            tabId: 'tab-1',
+            paneId: 'pane-1',
+            terminalId: 'term-1',
+          };
+        }
+        if (paneId === 'pane-2') {
+          const runStatePath = join(worktreePath, '.agent/herdr-workflow-run.json');
+          const runState = readWorkflowRunState(runStatePath);
+          if (runState) {
+            writeWorkflowRunState(runStatePath, {
+              ...runState,
+              currentPhase: 'ready',
+              updatedAt: '2026-06-30T12:00:02.000Z',
+            });
+          }
+          return {
+            tabId: 'tab-2',
+            paneId: 'pane-2',
+            terminalId: 'term-2',
+          };
+        }
+        return null;
+      },
+      readPaneTranscript(paneId) {
+        return paneId === 'pane-1' ? `node skills/herdr-implement/bin/daemon.ts\nHERDR_IMPLEMENT_DAEMON_EXIT:1\n$ ` : '';
+      },
+      createDaemonPane() {
+        return {
+          tabId: 'tab-2',
+          paneId: 'pane-2',
+          terminalId: 'term-2',
+        };
+      },
+      runPaneCommand(paneId, command) {
+        daemonCommands.push({ paneId, command });
+      },
+    }),
+    now: () => new Date('2026-06-30T12:00:01.000Z'),
+  });
+
+  assert.equal(result.mode, 'recovery');
+  assert.equal(result.health, 'healthy');
+  assert.equal(result.daemonPaneId, 'pane-2');
+  assert.deepEqual(daemonCommands, [
+    {
+      paneId: 'pane-2',
+      command: `${ensureDaemonCommandForTest(worktreePath)}; printf '\\nHERDR_IMPLEMENT_DAEMON_EXIT:%s\\n' "$?"`,
+    },
+  ]);
   assert.equal(readDaemonHandleState(result.handleStatePath)?.daemonPaneId, 'pane-2');
 });
 
@@ -1547,9 +1763,7 @@ test('bootstrap does not reuse an unrelated Herdr worktree', async () => {
         'pane',
         'run',
         'pane-1',
-        `node skills/herdr-implement/bin/daemon.ts --worktree ${JSON.stringify(
-          requestedWorktreePath,
-        )} --state .agent/herdr-workflow-run.json --handles .agent/herdr-implement.json`,
+        daemonPaneCommandForTest(requestedWorktreePath),
       ],
       result: { stdout: '', stderr: '', status: 0 },
     },
@@ -2102,9 +2316,7 @@ test('bootstrap fails when pane run fails before recording started handles', asy
         'pane',
         'run',
         'pane-1',
-        `node skills/herdr-implement/bin/daemon.ts --worktree ${JSON.stringify(
-          worktreePath,
-        )} --state .agent/herdr-workflow-run.json --handles .agent/herdr-implement.json`,
+        daemonPaneCommandForTest(worktreePath),
       ],
       result: { stdout: '', stderr: 'daemon failed', status: 1 },
     },

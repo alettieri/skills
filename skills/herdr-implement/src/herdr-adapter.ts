@@ -64,6 +64,7 @@ export type HerdrAdapter = {
   ensureWorktree(repository: RepositoryInfo, branchName: string, issueLabel: string): WorktreeInfo;
   createDaemonPane(workspaceId: string, worktreePath: string): HerdrPaneInfo;
   getPaneInfo(paneId: string): HerdrPaneInfo | null;
+  readPaneTranscript(paneId: string): string;
   runPaneCommand(paneId: string, command: string): void;
   launchRoleAgent(
     worktreePath: string,
@@ -133,6 +134,7 @@ type HerdrAgentStartArgs = readonly [
 ];
 type HerdrAgentMoveArgs = readonly ['pane', 'move', string, '--new-tab', '--workspace', string, '--label', string, '--focus'];
 type HerdrPaneGetArgs = readonly ['pane', 'get', string];
+type HerdrPaneReadArgs = readonly ['pane', 'read', string, '--source', 'recent-unwrapped', '--lines', '120'];
 type HerdrAgentSendArgs = readonly ['agent', 'send', string, string];
 type HerdrAgentSendEnterArgs = readonly ['pane', 'send-keys', string, 'Return'];
 type HerdrAgentGetArgs = readonly ['agent', 'get', string];
@@ -579,6 +581,10 @@ function buildPaneGetArgs(paneId: string): HerdrPaneGetArgs {
   return ['pane', 'get', paneId];
 }
 
+function buildPaneReadArgs(paneId: string): HerdrPaneReadArgs {
+  return ['pane', 'read', paneId, '--source', 'recent-unwrapped', '--lines', '120'];
+}
+
 function buildAgentSendArgs(agentName: string, prompt: string): HerdrAgentSendArgs {
   return ['agent', 'send', agentName, prompt];
 }
@@ -830,6 +836,31 @@ function getPaneInfo(runner: HerdrCommandRunner, paneId: string): HerdrPaneInfo 
   return paneInfo;
 }
 
+function extractPaneReadText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (!isRecord(value)) {
+    return '';
+  }
+
+  const result = isRecord(value.result) ? value.result : value;
+  const read = isRecord(result.read) ? result.read : result;
+  return typeof read.text === 'string' ? read.text : '';
+}
+
+function readPaneTranscript(runner: HerdrCommandRunner, paneId: string): string {
+  const result = runner.run(buildPaneReadArgs(paneId));
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    return '';
+  }
+
+  return extractPaneReadText(parseLiteralOrJsonOutput(result.stdout, `herdr pane read ${paneId} output`));
+}
+
 function parseAgentStatus(value: unknown): HerdrAgentInfo {
   if (!isRecord(value)) {
     return {
@@ -988,6 +1019,9 @@ export function createHerdrAdapter(runner: HerdrCommandRunner = buildDefaultRunn
     },
     getPaneInfo(paneId: string): HerdrPaneInfo | null {
       return getPaneInfo(runner, paneId);
+    },
+    readPaneTranscript(paneId: string): string {
+      return readPaneTranscript(runner, paneId);
     },
     getAgentStatus(agentName: string): HerdrAgentInfo {
       return getAgentStatus(runner, agentName);

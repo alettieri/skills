@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { accessSync, constants, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -32,6 +33,10 @@ import {
 export const RUN_STATE_PATH = WORKFLOW_RUN_STATE_PATH;
 export const HANDLE_STATE_PATH = DAEMON_HANDLE_STATE_PATH;
 export const DEFAULT_DAEMON_LABEL = 'herdr-implement-daemon';
+const DAEMON_EXIT_SENTINEL = 'HERDR_IMPLEMENT_DAEMON_EXIT';
+const POST_WORKTREE_SETUP_HOOK_PATH = '.agent/herdr-post-worktree-setup';
+const POST_WORKTREE_SETUP_LOG_PATH = '.agent/post-worktree-setup.log';
+const POST_WORKTREE_SETUP_TIMEOUT_MS = 10 * 60 * 1000;
 
 export type HerdrCommandResult = {
   stdout: string;
@@ -310,6 +315,14 @@ function ensureDaemonCommand(worktreePath: string): string {
   return `node skills/herdr-implement/bin/daemon.ts --worktree ${JSON.stringify(worktreePath)} --state ${RUN_STATE_PATH} --handles ${HANDLE_STATE_PATH}`;
 }
 
+function daemonPaneCommand(daemonCommand: string): string {
+  return `${daemonCommand}; printf '\\n${DAEMON_EXIT_SENTINEL}:%s\\n' "$?"`;
+}
+
+function paneTranscriptShowsDaemonExit(transcript: string): boolean {
+  return transcript.includes(`${DAEMON_EXIT_SENTINEL}:`) || /(?:^|\n)exit:\d+\s+\$/.test(transcript);
+}
+
 function createDaemonPane(
   adapter: HerdrAdapter,
   workspaceId: string,
@@ -336,12 +349,97 @@ function recoverDaemonPaneIfHealthy(
   if (!paneInfo || paneInfo.paneId !== existingHandleState.daemonPaneId) {
     return { tabId: null, paneId: null, healthy: false };
   }
+  const transcript = adapter.readPaneTranscript(existingHandleState.daemonPaneId);
+  if (paneTranscriptShowsDaemonExit(transcript)) {
+    return { tabId: null, paneId: null, healthy: false };
+  }
 
   return {
     tabId: existingHandleState.daemonTabId,
     paneId: existingHandleState.daemonPaneId,
     healthy: true,
   };
+}
+
+function isRuntimeOwnedAgentPath(path: string): boolean {
+  return (
+    path === '.agent/herdr-workflow-run.json' ||
+    path === '.agent/herdr-implement.json' ||
+    path === POST_WORKTREE_SETUP_LOG_PATH ||
+    path.startsWith('.agent/runs/')
+  );
+}
+
+function untrackedPathFromStatusLine(line: string): string {
+  return line.slice(3).trim();
+}
+
+function filteredDirtyStatus(worktreePath: string): string {
+  return gitStatusPorcelain(worktreePath)
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .filter((line) => !isRuntimeOwnedAgentPath(untrackedPathFromStatusLine(line)))
+    .join('\n');
+}
+
+function writePostWorktreeSetupLog(worktreePath: string, stdout: string, stderr: string, footer?: string): void {
+  const logPath = join(worktreePath, POST_WORKTREE_SETUP_LOG_PATH);
+  mkdirSync(join(worktreePath, '.agent'), { recursive: true });
+  const parts = [`[stdout]\n${stdout}`, `[stderr]\n${stderr}`];
+  if (footer) {
+    parts.push(`[post-worktree-setup]\n${footer}`);
+  }
+  writeFileSync(logPath, `${parts.join('\n')}\n`, 'utf8');
+}
+
+function isExecutable(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runPostWorktreeSetupBeforeDaemon(worktreePath: string): void {
+  const hookPath = join(worktreePath, POST_WORKTREE_SETUP_HOOK_PATH);
+  if (!existsSync(hookPath)) {
+    return;
+  }
+  if (!isExecutable(hookPath)) {
+    throw new Error(`post-worktree setup hook exists but is not executable: ${hookPath}`);
+  }
+
+  const result = spawnSync(hookPath, [], {
+    cwd: worktreePath,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: POST_WORKTREE_SETUP_TIMEOUT_MS,
+  });
+  const stdout = result.stdout ?? '';
+  const stderr = result.stderr ?? '';
+
+  if (result.error) {
+    writePostWorktreeSetupLog(worktreePath, stdout, stderr, `Startup error: ${result.error.message}`);
+    throw new Error(`post-worktree setup hook could not start: ${result.error.message}`);
+  }
+  if (result.signal) {
+    writePostWorktreeSetupLog(worktreePath, stdout, stderr, `Blocked: setup terminated by ${result.signal}.`);
+    throw new Error(`post-worktree setup hook terminated by ${result.signal}`);
+  }
+  if (result.status !== 0) {
+    writePostWorktreeSetupLog(worktreePath, stdout, stderr, `Blocked: hook exited ${result.status}.`);
+    throw new Error(`post-worktree setup hook exited with status ${result.status}`);
+  }
+
+  const dirtyStatus = filteredDirtyStatus(worktreePath);
+  if (dirtyStatus) {
+    writePostWorktreeSetupLog(worktreePath, stdout, stderr, `Blocked: hook left worktree dirty.\n${dirtyStatus}`);
+    throw new Error(`post-worktree setup hook left worktree dirty:\n${dirtyStatus}`);
+  }
+
+  writePostWorktreeSetupLog(worktreePath, stdout, stderr);
 }
 
 type BootstrapLaunchSnapshot = {
@@ -601,6 +699,10 @@ async function waitForHealthyDaemon(
     }
 
     if (Date.now() >= deadline) {
+      const transcript = adapter.readPaneTranscript(paneId);
+      if (paneTranscriptShowsDaemonExit(transcript)) {
+        return { health: 'pane-exited', currentPhase, reason: 'daemon command exited without state progress' };
+      }
       return { health: 'timed-out', currentPhase, reason: 'no state progress in 30s' };
     }
 
@@ -723,6 +825,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRes
 
     if (!recovered?.healthy) {
       try {
+        runPostWorktreeSetupBeforeDaemon(existingRunState.worktreePath);
         const daemonPane = createDaemonPane(adapter, existingRunState.workspaceId, existingRunState.worktreePath);
         const startedAt = nowIso(options.now);
         const updatedRunState = updateRunStateForDaemon(existingRunState, daemonPane.tabId, daemonPane.paneId, daemonCommand, startedAt);
@@ -746,7 +849,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRes
         snapshot.daemonPaneId = daemonPaneId;
         snapshot.createdHandleState = createdHandleState;
         snapshot.baselineStateWriteAt = baselineStateWriteAt;
-        adapter.runPaneCommand(daemonPane.paneId!, daemonCommand);
+        adapter.runPaneCommand(daemonPane.paneId!, daemonPaneCommand(daemonCommand));
       } catch (error) {
         throw bootstrapLaunchFailure(snapshot, existingRunState.currentPhase, error);
       }
@@ -759,6 +862,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRes
   const repository = detectRepositoryInfo(cwd, { allowMissingOriginHead: false });
   assertNewRunPreflight(repository);
   const createdWorktree = adapter.createWorktree(repository, branchName, `issue-${issue.slug}`);
+  runPostWorktreeSetupBeforeDaemon(createdWorktree.worktreePath);
   const daemonCommand = ensureDaemonCommand(createdWorktree.worktreePath);
   const createdAt = nowIso(options.now);
   const { runStatePath, handleStatePath } = workflowStatePathsFor(createdWorktree.worktreePath);
@@ -790,7 +894,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRes
     snapshot.daemonTabId = daemonPane.tabId;
     snapshot.daemonPaneId = daemonPane.paneId;
     snapshot.baselineStateWriteAt = startedAt;
-    adapter.runPaneCommand(daemonPane.paneId!, daemonCommand);
+    adapter.runPaneCommand(daemonPane.paneId!, daemonPaneCommand(daemonCommand));
     const health = await waitForHealthyDaemon(adapter, snapshot, workflowSource.workflow.start, startedAt, options);
     return bootstrapResultFromSnapshot(snapshot, health.health, health.currentPhase);
   } catch (error) {

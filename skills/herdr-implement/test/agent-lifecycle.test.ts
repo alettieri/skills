@@ -114,6 +114,9 @@ function createAdapter(overrides: Partial<HerdrAdapter> = {}): HerdrAdapter {
     getPaneInfo() {
       return null;
     },
+    readPaneTranscript() {
+      return '';
+    },
     runPaneCommand() {},
     launchRoleAgent() {
       return {
