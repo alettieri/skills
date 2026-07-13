@@ -65,6 +65,32 @@ printf generated > generated.txt
   assert.match(readFileSync(join(worktreePath, '.agent', 'post-worktree-setup.log'), 'utf8'), /hook left worktree dirty/);
 });
 
+test('post-worktree-setup ignores herdr runtime files when checking dirtiness', () => {
+  const worktreePath = tempWorktree();
+  initGitRepo(worktreePath);
+  writeExecutable(
+    join(worktreePath, '.agent', 'herdr-post-worktree-setup'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+printf setup-complete
+`,
+  );
+  const addHook = spawnSync('git', ['add', '.agent/herdr-post-worktree-setup'], { cwd: worktreePath, encoding: 'utf8' });
+  assert.equal(addHook.status, 0, addHook.stderr);
+  const commitHook = spawnSync('git', ['commit', '-m', 'add setup hook'], { cwd: worktreePath, encoding: 'utf8' });
+  assert.equal(commitHook.status, 0, commitHook.stderr);
+
+  writeFileSync(join(worktreePath, '.agent', 'herdr-implement.json'), '{}\n', 'utf8');
+  writeFileSync(join(worktreePath, '.agent', 'herdr-workflow-run.json'), '{}\n', 'utf8');
+  mkdirSync(join(worktreePath, '.agent', 'runs', 'setup'), { recursive: true });
+  writeFileSync(join(worktreePath, '.agent', 'runs', 'setup', 'stdout.log'), 'runtime\n', 'utf8');
+
+  const success = runScript('post-worktree-setup.sh', worktreePath);
+  assert.equal(success.status, 0, success.stderr);
+  assert.equal(success.stdout.trim(), 'success');
+  assert.match(readFileSync(join(worktreePath, '.agent', 'post-worktree-setup.log'), 'utf8'), /setup-complete/);
+});
+
 test('run-checks emits success, checks_failed, and no_checks outcomes', () => {
   const worktreePath = tempWorktree();
   writeFileSync(

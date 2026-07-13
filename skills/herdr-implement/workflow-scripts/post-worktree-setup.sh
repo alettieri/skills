@@ -30,6 +30,26 @@ log_path="$worktree_path/.agent/post-worktree-setup.log"
 
 mkdir -p "$(dirname "$log_path")"
 
+filter_runtime_git_status() {
+  local line path
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    path="${line:3}"
+
+    case "$path" in
+      .agent/herdr-implement.json | \
+      .agent/herdr-workflow-run.json | \
+      .agent/post-worktree-setup.log | \
+      .agent/runs/*)
+        continue
+        ;;
+    esac
+
+    printf '%s\n' "$line"
+  done
+}
+
 if [[ ! -e "$hook_path" ]]; then
   printf 'skipped\n'
   printf 'missing hook: %s\n' "$hook_path" > "$log_path"
@@ -66,6 +86,8 @@ if ! git_status_output="$(git -C "$worktree_path" status --porcelain --untracked
   } > "$log_path"
   exit 0
 fi
+
+git_status_output="$(printf '%s\n' "$git_status_output" | filter_runtime_git_status)"
 
 if [[ -n "$git_status_output" ]]; then
   printf 'blocked\n'
