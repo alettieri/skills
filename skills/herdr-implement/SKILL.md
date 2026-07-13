@@ -24,13 +24,13 @@ Use this skill when the user references an existing issue, ticket, or URL and wa
   ```
 - `bootstrap` normalizes the issue reference, detects the repository, loads the workflow, and either recovers an existing worktree by branch or creates a new one after preflight.
 - After launch or recovery, `bootstrap` waits for daemon health, then prints a JSON summary with `slug`, `mode`, `health`, `currentPhase`, and `nextInspectionCommand`.
-- The recovery summary is the JSON written to stdout; use `nextInspectionCommand` to inspect the workflow state file if you need the live recovery details.
+- The recovery summary is the JSON written to stdout; run `nextInspectionCommand` to inspect the active workflow run without opening the state file by hand.
   ```json
   {
     "mode": "recovered",
     "health": "healthy",
     "currentPhase": "implement",
-    "nextInspectionCommand": "cat \"/path/to/worktree/.agent/herdr-workflow-run.json\""
+    "nextInspectionCommand": "node skills/herdr-implement/bin/status.ts --worktree \"/path/to/worktree\""
   }
   ```
 - If health is `healthy`, step back after reporting the summary. The daemon now owns the lifecycle.
