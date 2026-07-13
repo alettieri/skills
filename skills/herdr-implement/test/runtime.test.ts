@@ -992,7 +992,10 @@ test('bootstrap creates worktree-local state and a daemon command that daemon.ts
   assert.equal(result.mode, 'new-run');
   assert.equal(result.health, 'healthy');
   assert.equal(result.currentPhase, 'ready');
-  assert.equal(result.nextInspectionCommand, `cat ${JSON.stringify(join(worktreePath, '.agent/herdr-workflow-run.json'))}`);
+  assert.equal(
+    result.nextInspectionCommand,
+    `node skills/herdr-implement/bin/status.ts --worktree ${JSON.stringify(worktreePath)}`,
+  );
   assert.equal(result.workspaceId, 'w16');
   assert.equal(result.worktreePath, worktreePath);
   assert.equal(result.runStatePath, join(worktreePath, '.agent/herdr-workflow-run.json'));

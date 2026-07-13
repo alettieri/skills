@@ -10,6 +10,7 @@ import { isTerminalPhase, resolveNextPhase } from './workflow-transition.ts';
 import { executeScriptPhase, recoverCompletedScriptPhase } from './script-phase.ts';
 import { advancePollWorkOnce } from './poll-phase.ts';
 import { advanceAgentWorkOnce } from './agent-lifecycle.ts';
+import { statusCommandForWorktree } from './status.ts';
 import { optionalTrimmedString } from './validation.ts';
 import {
   DAEMON_HANDLE_STATE_PATH,
@@ -495,7 +496,7 @@ function bootstrapResultFromSnapshot(
     mode: snapshot.mode,
     health,
     currentPhase,
-    nextInspectionCommand: `cat ${JSON.stringify(snapshot.runStatePath)}`,
+    nextInspectionCommand: statusCommandForWorktree(snapshot.worktreePath),
     workflowPath: snapshot.workflowPath,
     workspaceId: snapshot.workspaceId,
     worktreePath: snapshot.worktreePath,
