@@ -18,8 +18,13 @@ Use this skill when the user references an existing issue, ticket, or URL and wa
 - `bootstrap.ts` requires `HERDR_ENV=1` and a non-empty `--issue`.
 - `--help` works without `HERDR_ENV` and should describe the side effects up front.
 - `dry-run.ts` stays read-only and can be used for workflow inspection and validation.
+- Example:
+  ```bash
+  HERDR_ENV=1 node skills/herdr-implement/bin/bootstrap.ts --issue 70
+  ```
 - `bootstrap` normalizes the issue reference, detects the repository, loads the workflow, and either recovers an existing worktree by branch or creates a new one after preflight.
 - After launch or recovery, `bootstrap` waits for daemon health, then prints a JSON summary with `slug`, `mode`, `health`, `currentPhase`, and `nextInspectionCommand`.
+- The recovery summary is the JSON written to stdout; use `nextInspectionCommand` to inspect the workflow state file if you need the live recovery details.
 - If health is `healthy`, step back after reporting the summary. The daemon now owns the lifecycle.
 - If health is `timed-out` or `pane-exited`, surface the diagnostics as a blocker instead of blindly re-running.
 - Re-invoking the same issue reference should recover a stalled or dead daemon when the worktree already exists.
