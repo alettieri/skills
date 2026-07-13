@@ -36,8 +36,19 @@ export type AgentLifecycleResult = {
   result: DaemonStepResult;
 };
 
+const PENDING_AGENT_STARTUP_GRACE_MS = 15_000;
+
 function nowIso(now: () => Date): string {
   return now().toISOString();
+}
+
+function pendingRunAgeMs(pendingRun: PendingAgentRunState, now: () => Date): number | null {
+  const startedAt = Date.parse(pendingRun.startedAt);
+  if (!Number.isFinite(startedAt)) {
+    return null;
+  }
+
+  return Math.max(0, now().getTime() - startedAt);
 }
 
 function requireString(value: unknown, field: string): string {
@@ -637,6 +648,21 @@ function processPendingAgentRun(
   }
 
   if (agentInfo.status === 'idle' || agentInfo.status === 'unknown') {
+    const ageMs = pendingRunAgeMs(pendingRun, now);
+    if (ageMs !== null && ageMs < PENDING_AGENT_STARTUP_GRACE_MS) {
+      return {
+        state: {
+          ...state,
+          updatedAt,
+        },
+        result: {
+          status: 'sleep',
+          currentPhase: pendingRun.phaseId,
+          reason: `waiting for agent run ${pendingRun.runId} to leave startup grace`,
+        },
+      };
+    }
+
     const existingIdleRecovery = isRecord(state.context.idleAgentRecovery) ? state.context.idleAgentRecovery : null;
     if (optionalTrimmedString(existingIdleRecovery?.runId) === pendingRun.runId) {
       const blockedPhase = resolveNextPhase(state.workflow, pendingRun.phaseId, 'blocked');
