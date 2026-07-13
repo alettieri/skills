@@ -358,6 +358,77 @@ test('advanceAgentWorkOnce accepts a valid completion artifact and merges captur
   assert.equal(result.state.acceptedAgentRuns[runId].outcome, 'complete');
 });
 
+test('advanceAgentWorkOnce waits through transient idle status during agent startup', async () => {
+  const worktreePath = await tempWorktree();
+  const runId = 'issue-21-implement-implementer-1';
+  const state: WorkflowRunState = {
+    ...baseState(worktreePath),
+    pendingAgentRun: {
+      runId,
+      phaseId: 'implement',
+      roleId: 'implementer',
+      completionRole: 'implementer',
+      roleLabel: 'implementer',
+      agentName: 'issue-21-implementer',
+      resultSchema: 'implementer-result-v1',
+      resultPath: join(worktreePath, '.agent/runs', runId, 'result.json'),
+      notifyTarget: 'issue-21-orchestrator',
+      attemptNumber: 1,
+      startedAt: '2026-07-05T01:00:00.000Z',
+      status: 'pending',
+    },
+  };
+
+  let readTranscript = false;
+  let sentRewrite = false;
+  const result = invoke({
+    cwd: worktreePath,
+    state,
+    handleState: {
+      ...baseHandleState(worktreePath),
+      roleAgents: {
+        implementer: {
+          roleId: 'implementer',
+          roleLabel: 'implementer',
+          agentName: 'issue-21-implementer',
+          tabId: 'tab-1',
+          paneId: 'pane-1',
+          terminalId: 'term-1',
+          createdAt: '2026-07-05T01:00:00.000Z',
+          updatedAt: '2026-07-05T01:00:00.000Z',
+        },
+      },
+    },
+    adapter: createAdapter({
+      getAgentStatus() {
+        return {
+          agentName: 'issue-21-implementer',
+          paneId: 'pane-1',
+          tabId: 'tab-1',
+          terminalId: 'term-1',
+          status: 'idle',
+          rawStatus: 'idle',
+          failure: null,
+        };
+      },
+      readAgentTranscript() {
+        readTranscript = true;
+        return '';
+      },
+      sendPrompt() {
+        sentRewrite = true;
+      },
+    }),
+    now: () => new Date('2026-07-05T01:00:05.000Z'),
+  });
+
+  assert.equal(result.result.status, 'sleep');
+  assert.equal(result.result.reason, `waiting for agent run ${runId} to leave startup grace`);
+  assert.equal(result.state.pendingAgentRun?.runId, runId);
+  assert.equal(readTranscript, false);
+  assert.equal(sentRewrite, false);
+});
+
 test('advanceAgentWorkOnce requests rewrite for malformed artifacts', async () => {
   const worktreePath = await tempWorktree();
   const runId = 'issue-21-implement-implementer-1';
