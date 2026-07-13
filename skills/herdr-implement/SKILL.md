@@ -25,6 +25,14 @@ Use this skill when the user references an existing issue, ticket, or URL and wa
 - `bootstrap` normalizes the issue reference, detects the repository, loads the workflow, and either recovers an existing worktree by branch or creates a new one after preflight.
 - After launch or recovery, `bootstrap` waits for daemon health, then prints a JSON summary with `slug`, `mode`, `health`, `currentPhase`, and `nextInspectionCommand`.
 - The recovery summary is the JSON written to stdout; use `nextInspectionCommand` to inspect the workflow state file if you need the live recovery details.
+  ```json
+  {
+    "mode": "recovered",
+    "health": "healthy",
+    "currentPhase": "implement",
+    "nextInspectionCommand": "cat \"/path/to/worktree/.agent/herdr-workflow-run.json\""
+  }
+  ```
 - If health is `healthy`, step back after reporting the summary. The daemon now owns the lifecycle.
 - If health is `timed-out` or `pane-exited`, surface the diagnostics as a blocker instead of blindly re-running.
 - Re-invoking the same issue reference should recover a stalled or dead daemon when the worktree already exists.
