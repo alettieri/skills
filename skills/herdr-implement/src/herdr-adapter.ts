@@ -156,6 +156,7 @@ type HerdrAgentLaunchResult = {
 };
 
 const DEFAULT_DAEMON_LABEL = 'herdr-implement-daemon';
+const PROMPT_SEND_DELAY_MS = 3000;
 const PROMPT_SUBMIT_DELAY_MS = 3000;
 
 function sleepSync(ms: number): void {
@@ -817,6 +818,10 @@ function launchRoleAgent(
 }
 
 function sendPrompt(runner: HerdrCommandRunner, agentName: string, prompt: string): void {
+  // Herdr may report the agent pane before the Codex TUI owns input. Sending
+  // too early prints the prompt above the TUI instead of placing it in the
+  // prompt box, so wait briefly before delivery.
+  sleepSync(PROMPT_SEND_DELAY_MS);
   safeRunHerdrCommand(runner, buildAgentSendArgs(agentName, prompt));
 }
 
