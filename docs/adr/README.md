@@ -10,5 +10,6 @@ Read these before revisiting module seams or proposing broad refactors:
 - [ADR-0004: herdr-implement will use a workflow state store module](0004-herdr-implement-workflow-state-store.md)
 - [ADR-0005: herdr-implement separates source, entrypoints, and Workflow Scripts](0005-herdr-implement-separates-source-entrypoints-and-workflow-scripts.md)
 - [ADR-0006: herdr-implement uses a provider launch-policy seam](0006-herdr-implement-uses-a-provider-launch-policy-seam.md)
+- [ADR-0007: herdr-worktree-flow is deprecated in favor of herdr-implement](0007-herdr-worktree-flow-is-deprecated-in-favor-of-herdr-implement.md)
 
 Do not delete old ADRs. If a decision changes, add a new ADR and mark the old one as superseded.

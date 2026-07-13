@@ -1,9 +1,9 @@
 ---
 name: herdr-worktree-flow
-description: Implement an already-created issue in a Herdr-backed Git worktree, using an issue orchestrator, separate implementation and review agents, automatic fix/review loops, commit/push, PR creation, and PR feedback monitoring until merge or close.
+description: Deprecated legacy worktree orchestrator for Herdr-backed Git worktrees. Use herdr-implement for new daemon-driven issue execution; keep this skill only for transitional handoff, completion utility, and PR-monitor support.
 ---
 
-Use this skill when the user has already planned the work and created an issue, then wants that issue implemented in an isolated Herdr workspace.
+Deprecated: prefer `herdr-implement` for new issue execution. Use this skill only when you need the legacy live-agent orchestrator, the shared completion utility, or the PR-monitor support scripts while those helpers are still being migrated.
 
 This is a lifecycle skill, not a planning skill. The current session is the **main orchestrator** running from the source checkout, usually on `main`. It dispatches one issue into a fresh worktree workspace and then hands ownership off. Inside that workspace, an **issue orchestrator** owns the issue until the pull request is merged or closed.
 
