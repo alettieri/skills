@@ -156,6 +156,11 @@ type HerdrAgentLaunchResult = {
 };
 
 const DEFAULT_DAEMON_LABEL = 'herdr-implement-daemon';
+const PROMPT_SUBMIT_DELAY_MS = 3000;
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
 function requireString(value: unknown, field: string): string {
   const stringValue = optionalTrimmedString(value);
@@ -816,6 +821,10 @@ function sendPrompt(runner: HerdrCommandRunner, agentName: string, prompt: strin
 }
 
 function submitPrompt(runner: HerdrCommandRunner, paneId: string): void {
+  // Codex may still be rendering its startup screen after Herdr accepts
+  // agent-send text. Submitting immediately can leave the prompt staged but
+  // not running, so give the TUI a short readiness window before Enter.
+  sleepSync(PROMPT_SUBMIT_DELAY_MS);
   safeRunHerdrCommand(runner, buildAgentSendEnterArgs(paneId));
 }
 
