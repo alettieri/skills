@@ -129,10 +129,17 @@ test('classifySnapshot preserves check details for notification formatting', () 
 });
 
 test('parseArgs accepts a notification target', () => {
-  const args = parseArgs(['--pr', '42', '--notify-target', 'issue-orchestrator']);
+  const args = parseArgs(['--pr', '42', '--provider', 'github', '--notify-target', 'issue-orchestrator']);
 
   assert.equal(args.prRef, '42');
+  assert.equal(args.provider, 'github');
   assert.equal(args.notifyTarget, 'issue-orchestrator');
+});
+
+test('parseArgs defaults provider to null for github resolution', () => {
+  const args = parseArgs([]);
+
+  assert.equal(args.provider, null);
 });
 
 test('parseArgs rejects a missing notification target value', () => {
@@ -144,8 +151,8 @@ test('parseArgs rejects an empty notification target', () => {
 });
 
 test('normalizePullRequestPayload rejects non-object gh pr view payloads', () => {
-  assert.throws(() => normalizePullRequestPayload([]), /gh pr view returned malformed JSON/);
-  assert.throws(() => normalizePullRequestPayload(null), /gh pr view returned malformed JSON/);
+  assert.throws(() => normalizePullRequestPayload([]), /PR host returned malformed JSON/);
+  assert.throws(() => normalizePullRequestPayload(null), /PR host returned malformed JSON/);
 });
 
 test('normalizePullRequestPayload defaults malformed comment and review lists to empty arrays', () => {

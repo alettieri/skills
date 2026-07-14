@@ -43,6 +43,12 @@ JSON
       approved-none)
         printf '[]\n'
         ;;
+      approved-exit8)
+        cat <<'JSON'
+[{"bucket":"pass"}]
+JSON
+        exit 8
+        ;;
       *)
         exit 1
         ;;
@@ -110,4 +116,38 @@ test('approved PRs wait until checks pass instead of routing to feedback', () =>
   const pass = runHelper('approved-pass');
   assert.equal(pass.status, 0, pass.stderr);
   assert.deepEqual(JSON.parse(pass.stdout).outcome, 'approved');
+});
+
+test('approved PRs treat no-checks as an empty check list', () => {
+  const none = runHelper('approved-none');
+  assert.equal(none.status, 0, none.stderr);
+  assert.deepEqual(JSON.parse(none.stdout), {
+    outcome: 'waiting',
+    capture: {
+      pr_number: 42,
+      pr_url: 'https://github.com/acme/repo/pull/42',
+      pr_state: 'OPEN',
+      merged_at: null,
+      closed_at: null,
+      review_decision: 'APPROVED',
+      comment_count: 0,
+      review_count: 1,
+      latest_comment_at: null,
+      latest_review_at: '2026-07-05T00:00:00.000Z',
+      checks_bucket: 'unknown',
+      checks_total: 0,
+      checks_failing: 0,
+      checks_pending: 0,
+      checks_canceled: 0,
+      checks_skipped: 0,
+      checks_passing: 0,
+      feedback_present: true,
+    },
+  });
+});
+
+test('approved PRs tolerate gh pr checks exit code 8', () => {
+  const result = runHelper('approved-exit8');
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout).outcome, 'approved');
 });

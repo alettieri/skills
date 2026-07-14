@@ -2,6 +2,7 @@ export type OutputMode = 'text' | 'json';
 
 export type MonitorArgs = {
   intervalSeconds: number;
+  provider: string | null;
   once: boolean;
   notifyTarget: string | null;
   quiet: boolean;
@@ -142,7 +143,7 @@ function normalizeReview(value: unknown): ExternalReview {
 
 export function normalizePullRequestPayload(value: unknown): PullRequestPayload {
   if (!isRecord(value)) {
-    throw new Error('gh pr view returned malformed JSON: expected an object');
+    throw new Error('PR host returned malformed JSON: expected an object');
   }
 
   return {
@@ -252,6 +253,7 @@ export function normalizeHerdrAgentTarget(value: unknown): HerdrAgentTarget | nu
 export function parseArgs(argv: string[]): MonitorArgs {
   const args: MonitorArgs = {
     intervalSeconds: 30,
+    provider: null,
     once: false,
     notifyTarget: null,
     quiet: false,
@@ -277,6 +279,8 @@ export function parseArgs(argv: string[]): MonitorArgs {
       args.prRef = argv[++i] ?? null;
     } else if (arg === '--repo') {
       args.repo = argv[++i] ?? null;
+    } else if (arg === '--provider') {
+      args.provider = argv[++i] ?? null;
     } else if (arg === '--state-file') {
       args.stateFile = argv[++i] ?? null;
     } else if (arg === '--notify-target') {

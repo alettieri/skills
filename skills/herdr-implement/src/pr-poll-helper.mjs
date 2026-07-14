@@ -1,40 +1,12 @@
-import { spawnSync } from 'node:child_process';
 import {
   maxTimestamp,
-  normalizeCheckResultsPayload,
-  normalizePullRequestPayload,
   summarizeChecks,
 } from '../../herdr-worktree-flow/scripts/pr-monitor-domain.ts';
+import { createPrHostProvider } from '../../herdr-worktree-flow/scripts/pr-host-provider.ts';
 
 function fail(message) {
   process.stderr.write(`${message}\n`);
   process.exit(1);
-}
-
-function runGh(args) {
-  const result = spawnSync('gh', args, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  if (result.error) {
-    throw result.error;
-  }
-
-  return result;
-}
-
-function runGhJson(args, allowNoChecks = false) {
-  const result = runGh(args);
-  if (allowNoChecks && result.status === 1 && result.stderr.includes('no checks reported')) {
-    return [];
-  }
-  if (result.status !== 0) {
-    throw new Error(`gh ${args.join(' ')} failed with exit ${result.status}: ${result.stderr.trim()}`);
-  }
-
-  const stdout = result.stdout.trim();
-  return stdout ? JSON.parse(stdout) : null;
 }
 
 function optionalString(value) {
@@ -92,32 +64,9 @@ function main() {
   }
 
   try {
-    const prFields = [
-      'number',
-      'url',
-      'state',
-      'mergedAt',
-      'closedAt',
-      'reviewDecision',
-      'updatedAt',
-      'title',
-      'comments',
-      'reviews',
-    ].join(',');
-
-    const prViewArgs = ['pr', 'view'];
-    if (prRef) {
-      prViewArgs.push(prRef);
-    }
-    prViewArgs.push('--json', prFields);
-    const pr = normalizePullRequestPayload(runGhJson(prViewArgs));
-
-    const checksArgs = ['pr', 'checks'];
-    if (prRef) {
-      checksArgs.push(prRef);
-    }
-    checksArgs.push('--json', 'bucket,state,name,workflow,description,link');
-    const checks = normalizeCheckResultsPayload(runGhJson(checksArgs, true));
+    const provider = createPrHostProvider();
+    const pr = provider.fetchPullRequest(prRef, null);
+    const checks = provider.fetchChecks(prRef, null);
 
     const commentCount = pr.comments.length;
     const reviewCount = pr.reviews.length;
