@@ -58,7 +58,7 @@ These are local agent state, not lifecycle artifacts to commit unless the reposi
 
 | Role | Launch command | Permission mode |
 |---|---|---|
-| Issue orchestrator | `claude --model opus --effort high --permission-mode auto` | auto |
+| Issue orchestrator | `claude --model opus --effort low --permission-mode auto` | auto |
 | Implementer | `claude --model sonnet --effort high --permission-mode auto` | auto |
 | Reviewer | `claude --model opus --effort medium --permission-mode auto` | auto |
 

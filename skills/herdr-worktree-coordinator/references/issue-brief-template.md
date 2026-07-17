@@ -42,7 +42,7 @@ Constraints:
 - Work only inside this worktree.
 
 Launch policy (snapshot for this ticket's record — SKILL.md's Agent Launch Policy table is the source of truth; keep this in sync with it, not the other way around):
-- Issue orchestrator: `claude --model opus --effort high --permission-mode auto`
+- Issue orchestrator: `claude --model opus --effort low --permission-mode auto`
 - Implementer: `claude --model sonnet --effort high --permission-mode auto`
 - Reviewer: `claude --model opus --effort medium --permission-mode auto`
 - PR monitor: no model flag, it is a script process, not an agent.
