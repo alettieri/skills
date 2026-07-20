@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { mkdir, writeFile, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -867,7 +867,7 @@ async function main(): Promise<void> {
   }
 }
 
-const entryPoint = process.argv[1] ? pathToFileURL(process.argv[1]).href : null;
+const entryPoint = process.argv[1] ? pathToFileURL(realpathSync(process.argv[1])).href : null;
 
 if (entryPoint && import.meta.url === entryPoint) {
   main().catch((error: unknown) => {

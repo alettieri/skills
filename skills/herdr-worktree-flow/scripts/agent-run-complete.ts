@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -261,7 +261,7 @@ async function main(): Promise<void> {
   process.stderr.write(`agent-run-complete delivered target=${args.notifyTarget} attempts=${attempts} marker=${notificationPath}\n`);
 }
 
-const entryPoint = process.argv[1] ? pathToFileURL(process.argv[1]).href : null;
+const entryPoint = process.argv[1] ? pathToFileURL(realpathSync(process.argv[1])).href : null;
 
 if (entryPoint && import.meta.url === entryPoint) {
   main().catch((error: unknown) => {
