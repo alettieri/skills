@@ -109,10 +109,10 @@ This delivers `AGENT_RUN_BLOCKED <runId> <resultPath>` to the main orchestrator'
 
 ### 1. Preflight (main orchestrator)
 
-Confirm the ticket reference. Derive a branch name from it. Create the workspace and the worktree/branch together in one call:
+Confirm the ticket reference, then fetch the ticket's title from Linear (`get_issue`) so the workspace is recognizable at a glance — the bare ticket number alone makes it hard to tell what a tab is for. Derive a branch name from the reference. Build the label as `<ticket> <title>` (e.g. `WEB-3756 Migrate settings page to src-modern`); keep the raw ticket number as the first token so downstream lookups can still parse it. If the Linear fetch fails, fall back to the bare ticket number rather than blocking. Create the workspace and the worktree/branch together in one call:
 
 ```bash
-herdr worktree create --cwd <repo> --branch <name> --base <base> --label <ticket> --json
+herdr worktree create --cwd <repo> --branch <name> --base <base> --label "<ticket> <title>" --json
 ```
 
 ### 2. Handoff (main orchestrator)
